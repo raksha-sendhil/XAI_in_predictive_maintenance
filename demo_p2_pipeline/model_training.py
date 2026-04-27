@@ -6,10 +6,12 @@ Trains and saves:
   - fault_regressor.pkl   : RandomForestRegressor   → predicts all 3 severity columns
                             (LeakFault, BlockingFault, BearingFault) simultaneously
   - feature_scaler.pkl    : StandardScaler fitted on training features only
+  - model_metrics.json    : Classifier + regressor metrics for the Streamlit UI
 
 Run this ONCE. After the .pkl files are saved, use fault_prediction.py for inference.
 """
 
+import json
 import numpy as np
 import pandas as pd
 import joblib
@@ -111,11 +113,19 @@ regressor.fit(X_train_sc, y_train_reg)
 y_pred_reg = regressor.predict(X_test_sc)   # shape: (n_test, 3)
 
 print("\nRegressor Metrics (per severity column):")
+reg_metrics_dict = {}
 for i, col in enumerate(SEVERITY_COLS):
     mae  = mean_absolute_error(y_test_reg.iloc[:, i], y_pred_reg[:, i])
     rmse = np.sqrt(mean_squared_error(y_test_reg.iloc[:, i], y_pred_reg[:, i]))
     r2   = r2_score(y_test_reg.iloc[:, i], y_pred_reg[:, i])
     print(f"  {col:<20} MAE={mae:.4e}  RMSE={rmse:.4e}  R²={r2:.4f}")
+    reg_metrics_dict[col] = {'MAE': mae, 'RMSE': rmse, 'R2': r2}
+
+# -- NEW: Calculate Overall Regressor Metrics --
+overall_mae = mean_absolute_error(y_test_reg, y_pred_reg)
+overall_rmse = np.sqrt(mean_squared_error(y_test_reg, y_pred_reg))
+overall_r2 = r2_score(y_test_reg, y_pred_reg)
+print(f"\nOverall Regressor R²: {overall_r2:.4f}")
 
 # =============================================================================
 # SAVE MODELS
@@ -129,4 +139,36 @@ print("\nSaved:")
 print("  fault_classifier.pkl")
 print("  fault_regressor.pkl")
 print("  feature_scaler.pkl")
+
+# =============================================================================
+# SAVE MODEL METRICS
+# =============================================================================
+
+target_names = ['Healthy', 'LeakFault', 'BlockingFault', 'BearingFault']
+
+cls_report_dict = classification_report(
+    y_test_cls, y_pred_cls,
+    target_names=target_names,
+    output_dict=True
+)
+
+per_class_report = {name: cls_report_dict[name] for name in target_names}
+
+metrics_payload = {
+    "classifier": {
+        "accuracy"               : float(cls_acc),
+        "classification_report"  : per_class_report,
+    },
+    "regressor": {
+        **reg_metrics_dict, # Unpacks the per-column dicts
+        "overall_r2"   : float(overall_r2),
+        "overall_mae"  : float(overall_mae),
+        "overall_rmse" : float(overall_rmse)
+    },
+}
+
+with open('model_metrics.json', 'w') as f:
+    json.dump(metrics_payload, f, indent=2)
+
+print("  model_metrics.json")
 print("\nTraining complete. Run fault_prediction.py for inference.")
