@@ -396,14 +396,14 @@ def build_validation_plot(r):
             label=f"Extrapolated → RUL = {r['RUL_pred']:.1f} days")
 
     # True full lifecycle
-    ax.plot(df['current_day'].values, df['severity'].values,
+    ax.plot(df['current_day'].values, df['true_severity'].values,
             color='#66bb6a', linewidth=1.8, linestyle='-.',
-            label='Predicted severity (reference)')
+            label='True severity (full lifecycle)')
 
     # Regressor predicted severity
-    ax.plot(df['current_day'].values, df['true_severity'].values,
+    ax.plot(df['current_day'].values, df['severity'].values,
             color='#ab47bc', linewidth=1.0, linestyle=':',
-            label='True severity (full lifecycle)')
+            label='Predicted severity (reference)')
 
     # Current day
     ax.axvline(cur, color='#ce93d8', linestyle=':', linewidth=1.8,
@@ -489,10 +489,10 @@ def style_fault_table(df_styled):
 
 # App header
 st.markdown("""
-<div style="padding: 18px 0 8px 0;">
+<div style="padding: 18px 0 8px 0;", align="center">
   <span style="font-size:1.8rem; font-weight:800; letter-spacing:0.03em;">
     ⚙️ Predictive Maintenance Pipeline
-  </span>
+  </span><br>
   <span style="font-size:0.9rem; color:#6b7299; margin-left:16px;">
     Fault Detection  ·  Severity Regression  ·  RUL Estimation
   </span>
@@ -596,18 +596,18 @@ with tab_pred:
                 st.markdown('<div class="section-header">Prediction Results</div>',
                             unsafe_allow_html=True)
 
-                c1, c2,c3,c4= st.columns(4)
-                with c2:
+                c1, c2= st.columns(2)
+                with c1:
                     badge = fault_badge(res['fault_class'])
                     st.markdown(
                         f'<div class="metric-card">'
                         f'  <div class="metric-label">Detected Fault</div>'
                         f'  <div style="margin-top:10px;">{badge}</div>'
-                        f'   <div></div>'
+                        f'   <div><br></div>'
                         f'</div>',
                         unsafe_allow_html=True
                     )
-                with c3:
+                with c2:
                     metric_card(
                         "Remaining Useful Life",
                         f"{res['RUL_pred']:.1f} days",
@@ -659,63 +659,60 @@ with tab_val:
         metrics = None
 
     if metrics:
-        # c_fault, c_reg = st.columns(2)
-        # with c_fault:
-        # ── Classifier metrics ────────────────────────────────────────────────
-        st.markdown("#### Fault Classifier")
-        acc = metrics.get('classifier', {}).get('accuracy', None)
+        c_fault, c_reg = st.columns(2)
+        with c_fault:
+            # ── Classifier metrics ────────────────────────────────────────────────
+            st.markdown("#### Fault Classifier", text_alignment='center')
+            acc = metrics.get('classifier', {}).get('accuracy', None)
 
-        col_acc, col_pad = st.columns([1, 3])
-        with col_acc:
+            
             metric_card("Overall Accuracy",
-                        f"{acc * 100:.2f}%" if acc is not None else "N/A",
-                        sub="RandomForestClassifier")
+                            f"{acc * 100:.2f}%" if acc is not None else "N/A",
+                            sub="RandomForestClassifier")
 
-        st.markdown("")
+            st.markdown("")
 
-        # Classification report table
-        report = metrics.get('classifier', {}).get('classification_report', {})
-        class_labels = ['Healthy', 'LeakFault', 'BlockingFault', 'BearingFault']
-        report_rows  = []
-        for label in class_labels:
-            row_data = report.get(label, {})
-            report_rows.append({
-                'Class'     : label,
-                'Precision' : f"{row_data.get('precision', 0):.3f}",
-                'Recall'    : f"{row_data.get('recall', 0):.3f}",
-                'F1-Score'  : f"{row_data.get('f1-score', 0):.3f}",
-                'Support'   : int(row_data.get('support', 0)),
-            })
-        df_report = pd.DataFrame(report_rows)
-        st.dataframe(df_report, use_container_width=True, hide_index=True)
+            # Classification report table
+            report = metrics.get('classifier', {}).get('classification_report', {})
+            class_labels = ['Healthy', 'LeakFault', 'BlockingFault', 'BearingFault']
+            report_rows  = []
+            for label in class_labels:
+                row_data = report.get(label, {})
+                report_rows.append({
+                    'Class'     : label,
+                    'Precision' : f"{row_data.get('precision', 0):.3f}",
+                    'Recall'    : f"{row_data.get('recall', 0):.3f}",
+                    'F1-Score'  : f"{row_data.get('f1-score', 0):.3f}",
+                    'Support'   : int(row_data.get('support', 0)),
+                })
+            df_report = pd.DataFrame(report_rows)
+            st.dataframe(df_report, use_container_width=True, hide_index=True)
 
-        st.divider()
+        with c_reg:
 
-        # ── Regressor metrics ─────────────────────────────────────────────────
-        st.markdown("#### Fault factor Regressor")
-        reg_metrics = metrics.get('regressor', {})
-        
-        # Display Overall Regressor Score (R²)
-        overall_r2 = reg_metrics.get('overall_r2', None)
-        col_r2, col_pad2 = st.columns([1, 3])
-        with col_r2:
+            # ── Regressor metrics ─────────────────────────────────────────────────
+            st.markdown("#### Fault Factor Regressor", text_alignment='center')
+            reg_metrics = metrics.get('regressor', {})
+            
+            # Display Overall Regressor Score (R²)
+            overall_r2 = reg_metrics.get('overall_r2', None)
             metric_card("Overall Accuracy",
-                        f"{overall_r2 * 100:.2f}%" if overall_r2 is not None else "N/A",
-                        sub="RandomForestRegressor")
-        st.markdown("")
+                            f"{overall_r2 * 100:.2f}%" if overall_r2 is not None else "N/A",
+                            sub="RandomForestRegressor")
+            st.markdown("")
 
-        # Display Per-Column Table
-        reg_rows = []
-        for col in SEVERITY_COLS:
-            m = reg_metrics.get(col, {})
-            reg_rows.append({
-                'Severity Column' : col,
-                'MAE'  : f"{m.get('MAE',  0):.4e}",
-                'RMSE' : f"{m.get('RMSE', 0):.4e}",
-                'R²'   : f"{m.get('R2',   0):.4f}",
-            })
-        df_reg = pd.DataFrame(reg_rows)
-        st.dataframe(df_reg, use_container_width=True, hide_index=True)
+            # Display Per-Column Table
+            reg_rows = []
+            for col in SEVERITY_COLS:
+                m = reg_metrics.get(col, {})
+                reg_rows.append({
+                    'Severity Column' : col,
+                    'MAE'  : f"{m.get('MAE',  0):.4e}",
+                    'RMSE' : f"{m.get('RMSE', 0):.4e}",
+                    'R²'   : f"{m.get('R2',   0):.4f}",
+                })
+            df_reg = pd.DataFrame(reg_rows)
+            st.dataframe(df_reg, use_container_width=True, hide_index=True)
 
     st.divider()
 
