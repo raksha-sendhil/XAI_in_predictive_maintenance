@@ -213,7 +213,7 @@ def run_fault_prediction(df_input, classifier, regressor, scaler):
 # ─────────────────────────────────────────────────────────────────────────────
 def run_rul_prediction(rul_df, how_many_days):
     """
-    Replicates rul_prediction.py logic.
+    Replicates rul_prediction.py logic using PREDICTED severity.
     Returns dict with all results, or raises on failure.
     """
     df = rul_df.sort_values('current_day').reset_index(drop=True)
@@ -222,8 +222,9 @@ def run_rul_prediction(rul_df, how_many_days):
     cfg         = FAULT_CONFIG[fault_class]
     decreasing  = cfg['decreasing']
 
-    S_first = float(df['true_severity'].iloc[0])
-    S_last  = float(df['true_severity'].iloc[-1])
+    # NEW: Use predicted 'severity' instead of 'true_severity' for the bounds
+    S_first = float(df['severity'].iloc[0])
+    S_last  = float(df['severity'].iloc[-1])
 
     if decreasing:
         S_max = S_first; S_min = S_last
@@ -240,7 +241,9 @@ def run_rul_prediction(rul_df, how_many_days):
     history_df    = df.iloc[:n_days].copy()
     current_day   = int(history_df['current_day'].iloc[-1])
     days_hist     = history_df['current_day'].values.astype(float)
-    severity_hist = history_df['true_severity'].values.astype(float)
+    
+    # NEW: Feed the predicted severity history into the curve fitter
+    severity_hist = history_df['severity'].values.astype(float)
 
     smoothed_sev = uniform_filter1d(severity_hist, size=3, mode='nearest')
 
@@ -301,7 +304,6 @@ def run_rul_prediction(rul_df, how_many_days):
         df_full=df,
         n_days=n_days,
     )
-
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPER — build PREDICTION plot (no ground truth)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -378,10 +380,9 @@ def build_validation_plot(r):
     cur       = r['current_day']
     df        = r['df_full']
 
-    # Raw scatter
+    # Raw scatter (UPDATED LABEL)
     ax.scatter(r['days_hist'], r['severity_hist'], s=35, color='#ef5350',
-               zorder=5, label=f"True severity (days 1–{cur})")
-
+               zorder=5, label=f"Predicted severity (days 1–{cur}, used for fit)")
     
     # Fitted past
     mask_past = plot_days <= cur
