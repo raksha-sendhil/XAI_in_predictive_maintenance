@@ -348,7 +348,7 @@ def build_prediction_plot(r):
         color='#e8eaf0', fontsize=12, pad=12
     )
     ax.set_xlabel('Days in Operation', fontsize=11)
-    ax.set_ylabel('Fault Severity', fontsize=11)
+    ax.set_ylabel('Fault Factor', fontsize=11)
 
     if r['decreasing']:
         ax.set_ylim(r['S_min'] * 0.95, r['S_max'] * 1.05)
@@ -380,12 +380,9 @@ def build_validation_plot(r):
 
     # Raw scatter
     ax.scatter(r['days_hist'], r['severity_hist'], s=35, color='#ef5350',
-               zorder=5, label=f"True severity (days 1–{cur}, used for fit)")
+               zorder=5, label=f"True severity (days 1–{cur})")
 
-    # Smoothed
-    ax.plot(r['days_hist'], r['smoothed_sev_plot'], color='#ffa726',
-            linewidth=1.4, linestyle='--', label='Smoothed (3-day avg)')
-
+    
     # Fitted past
     mask_past = plot_days <= cur
     ax.plot(plot_days[mask_past], sev_fit[mask_past],
@@ -405,7 +402,7 @@ def build_validation_plot(r):
     # Regressor predicted severity
     ax.plot(df['current_day'].values, df['severity'].values,
             color='#ab47bc', linewidth=1.0, linestyle=':',
-            label='Regressor predicted severity (reference)')
+            label='Predicted severity (reference)')
 
     # Current day
     ax.axvline(cur, color='#ce93d8', linestyle=':', linewidth=1.8,
@@ -430,7 +427,7 @@ def build_validation_plot(r):
         color='#e8eaf0', fontsize=11, pad=12
     )
     ax.set_xlabel('Days in Operation', fontsize=11)
-    ax.set_ylabel('Fault Severity', fontsize=11)
+    ax.set_ylabel('Fault Factor', fontsize=11)
 
     if r['decreasing']:
         ax.set_ylim(r['S_min'] * 0.95, r['S_max'] * 1.05)
@@ -522,11 +519,10 @@ with tab_pred:
         st.stop()
 
     # ── File uploader ─────────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">Upload Machine Lifecycle CSV</div>',
+    st.markdown('<div class="section-header">Upload Demo Data CSV</div>',
                 unsafe_allow_html=True)
 
-    uploaded = st.file_uploader(
-        "Upload `machine_lifecycle_input.csv`",
+    uploaded = st.file_uploader(label="",
         type=["csv"],
         key="pred_upload",
         help="One row per day. Must contain all 14 feature columns, "
@@ -544,11 +540,11 @@ with tab_pred:
         st.session_state['uploaded_df'] = df_raw
 
         total_rows = len(df_raw)
-        st.markdown('<div class="section-header">Simulation Parameters</div>',
+        st.markdown('<div class="section-header">Set Current Day</div>',
                     unsafe_allow_html=True)
 
         how_many = st.slider(
-            "Current Day (days of data to use for RUL fit)",
+            label="",
             min_value=3,
             max_value=total_rows,
             value=min(20, total_rows),
@@ -557,7 +553,7 @@ with tab_pred:
                  "More days → more accurate fit."
         )
 
-        run_btn = st.button("▶  Run Pipeline", type="primary", use_container_width=False)
+        run_btn = st.button("▶  Run Prediction", type="primary", use_container_width=False)
 
         if run_btn or ('pred_results' in st.session_state and
                        st.session_state.get('pred_how_many') == how_many and
@@ -599,34 +595,35 @@ with tab_pred:
                 st.markdown('<div class="section-header">Prediction Results</div>',
                             unsafe_allow_html=True)
 
-                c1, c2, c3, c4 = st.columns(4)
-                with c1:
+                c1, c2,c3,c4= st.columns(4)
+                with c2:
                     badge = fault_badge(res['fault_class'])
                     st.markdown(
                         f'<div class="metric-card">'
                         f'  <div class="metric-label">Detected Fault</div>'
                         f'  <div style="margin-top:10px;">{badge}</div>'
+                        f'   <div></div>'
                         f'</div>',
                         unsafe_allow_html=True
                     )
-                with c2:
+                with c3:
                     metric_card(
                         "Remaining Useful Life",
                         f"{res['RUL_pred']:.1f} days",
                         sub=f"as of day {res['current_day']}"
-                    )
-                with c3:
-                    metric_card(
-                        "Predicted Lifecycle",
-                        f"{res['L_pred']:.1f} days",
-                        sub=f"α = {res['alpha_pred']:.3f}"
-                    )
-                with c4:
-                    metric_card(
-                        "Degradation Shape (α)",
-                        f"{res['alpha_pred']:.3f}",
-                        sub=f"±{res['alpha_err']:.3f}"
-                    )
+                  )
+                # with c3:
+                #     metric_card(
+                #         "Predicted Lifecycle",
+                #         f"{res['L_pred']:.1f} days",
+                #         sub=f"α = {res['alpha_pred']:.3f}"
+                #     )
+                # with c4:
+                #     metric_card(
+                #         "Degradation Shape (α)",
+                #         f"{res['alpha_pred']:.3f}",
+                #         sub=f"±{res['alpha_err']:.3f}"
+                #     )
 
                 st.markdown("")
 
@@ -661,8 +658,10 @@ with tab_val:
         metrics = None
 
     if metrics:
+        # c_fault, c_reg = st.columns(2)
+        # with c_fault:
         # ── Classifier metrics ────────────────────────────────────────────────
-        st.markdown("#### 🌲 Fault Classifier")
+        st.markdown("#### Fault Classifier")
         acc = metrics.get('classifier', {}).get('accuracy', None)
 
         col_acc, col_pad = st.columns([1, 3])
@@ -692,15 +691,15 @@ with tab_val:
         st.divider()
 
         # ── Regressor metrics ─────────────────────────────────────────────────
-        st.markdown("#### 📈 Fault Severity Regressor")
+        st.markdown("#### Fault factor Regressor")
         reg_metrics = metrics.get('regressor', {})
         
         # Display Overall Regressor Score (R²)
         overall_r2 = reg_metrics.get('overall_r2', None)
         col_r2, col_pad2 = st.columns([1, 3])
         with col_r2:
-            metric_card("Overall R² Score",
-                        f"{overall_r2:.4f}" if overall_r2 is not None else "N/A",
+            metric_card("Overall Accuracy",
+                        f"{overall_r2 * 100:.2f}%" if overall_r2 is not None else "N/A",
                         sub="RandomForestRegressor")
         st.markdown("")
 
@@ -722,22 +721,14 @@ with tab_val:
     # ── Full validation RUL plot ──────────────────────────────────────────────
     st.markdown('<div class="section-header">Validation RUL Plot</div>',
                 unsafe_allow_html=True)
-    # ... rest of the plotting code remains exactly the same
-
-    st.divider()
-
-    
-    # ── Full validation RUL plot ──────────────────────────────────────────────
-    st.markdown('<div class="section-header">Validation RUL Plot</div>',
-                unsafe_allow_html=True)
 
     if 'pred_results' in st.session_state:
         res = st.session_state['pred_results']
-        st.caption(
-            f"Using day **{res['current_day']}** as the cutoff  |  "
-            f"True lifecycle: **{res['true_last_day']} days**  |  "
-            f"RUL error: **{abs(res['RUL_pred'] - res['true_rul']):.1f} days**"
-        )
+        # st.caption(
+        #     f"Using day **{res['current_day']}** as the cutoff  |  "
+        #     f"True lifecycle: **{res['true_last_day']} days**  |  "
+        #     f"RUL error: **{abs(res['RUL_pred'] - res['true_rul']):.1f} days**"
+        # )
         fig = build_validation_plot(res)
         show_fig(fig)
     else:
