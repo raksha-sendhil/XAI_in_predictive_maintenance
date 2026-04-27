@@ -396,14 +396,14 @@ def build_validation_plot(r):
             label=f"Extrapolated → RUL = {r['RUL_pred']:.1f} days")
 
     # True full lifecycle
-    ax.plot(df['current_day'].values, df['true_severity'].values,
+    ax.plot(df['current_day'].values, df['severity'].values,
             color='#66bb6a', linewidth=1.8, linestyle='-.',
-            label='True severity (full lifecycle)')
+            label='Predicted severity (reference)')
 
     # Regressor predicted severity
-    ax.plot(df['current_day'].values, df['severity'].values,
+    ax.plot(df['current_day'].values, df['true_severity'].values,
             color='#ab47bc', linewidth=1.0, linestyle=':',
-            label='Predicted severity (reference)')
+            label='True severity (full lifecycle)')
 
     # Current day
     ax.axvline(cur, color='#ce93d8', linestyle=':', linewidth=1.8,
