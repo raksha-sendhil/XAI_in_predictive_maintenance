@@ -86,7 +86,7 @@ predicted_classes     = classifier.predict(X_scaled)
 df['pred_FaultClass'] = predicted_classes
 
 print("\n--- Predicted FaultClass per row ---")
-for i, row in df.iterrows():
+for i, row in df.sort_values(by='current_day').iterrows():
     print(f"  Day {int(row['current_day']):>3} | "
           f"Predicted: {int(row['pred_FaultClass'])}  "
           f"True: {int(row['FaultClass'])}")
@@ -126,13 +126,14 @@ for idx, col in enumerate(SEVERITY_COLS):
 if severity_col is not None:
     pred_col_name = f'pred_{severity_col}'
     print(f"\n--- Validation Table (fault: {severity_col}) ---")
-    header = f"{'Day':>5} | {'Pred Severity':>18} | {'True Severity':>18}"
+    header = f"{'Day':>5} | {'Pred Severity':>18} | {'True Severity':>18} | {'Error in %':>18}"
     print(header)
     print("-" * len(header))
-    for _, row in df.iterrows():
+    for _, row in df.sort_values(by='current_day').iterrows():
         print(f"  {int(row['current_day']):>3}  | "
               f"{row[pred_col_name]:>18.6e} | "
-              f"{row[severity_col]:>18.6e}")
+              f"{row[severity_col]:>18.6e}"
+              f" | {(abs(row[pred_col_name] - row[severity_col]))/(row[severity_col]):.2%}")
 else:
     print("\n(No validation table — machine predicted healthy.)")
 
