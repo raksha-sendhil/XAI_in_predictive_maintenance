@@ -662,7 +662,7 @@ with tab_val:
         c_fault, c_reg = st.columns(2)
         with c_fault:
             # ── Classifier metrics ────────────────────────────────────────────────
-            st.markdown("#### Fault Classifier", text_alignment='center')
+            st.markdown("#### Fault Classifier")
             acc = metrics.get('classifier', {}).get('accuracy', None)
 
             
@@ -691,7 +691,7 @@ with tab_val:
         with c_reg:
 
             # ── Regressor metrics ─────────────────────────────────────────────────
-            st.markdown("#### Fault Factor Regressor", text_alignment='center')
+            st.markdown("#### Fault Factor Regressor")
             reg_metrics = metrics.get('regressor', {})
             
             # Display Overall Regressor Score (R²)
