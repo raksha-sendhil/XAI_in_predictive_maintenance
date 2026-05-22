@@ -1,0 +1,225 @@
+
+body {
+
+  margin: 0;
+  padding: 0;
+  background: #0f1117;
+  color: #e8eaf0;
+  font-family: Arial, Helvetica, sans-serif;
+
+}
+
+.App {
+
+  padding: 30px;
+
+}
+
+.main-title {
+
+  text-align: center;
+  font-size: 42px;
+  margin-bottom: 10px;
+  color: white;
+
+}
+
+.subtitle {
+
+  text-align: center;
+  color: #8b92b8;
+  margin-bottom: 40px;
+
+}
+
+.section {
+
+  background: #1c1f2e;
+  padding: 25px;
+  margin-bottom: 30px;
+  border-radius: 16px;
+  border: 1px solid #2e3250;
+  box-shadow: 0px 0px 20px rgba(0,0,0,0.3);
+
+}
+
+h2 {
+
+  color: #c5cae9;
+  margin-bottom: 20px;
+
+}
+
+button {
+
+  background: #5c6bc0;
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  margin: 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 15px;
+  transition: 0.3s;
+
+}
+
+button:hover {
+
+  background: #7986cb;
+  transform: scale(1.03);
+
+}
+
+.selected-fault {
+
+  background: #ef5350 !important;
+
+}
+
+.progress-container {
+
+  width: 100%;
+  height: 25px;
+  background: #2e3250;
+  border-radius: 20px;
+  overflow: hidden;
+  margin-top: 20px;
+
+}
+
+.progress-bar {
+
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    #42a5f5,
+    #66bb6a
+  );
+
+  transition: width 0.4s;
+
+}
+
+.graph-image {
+
+  width: 100%;
+  max-width: 900px;
+  border-radius: 20px;
+  border: 1px solid #2e3250;
+  margin-top: 20px;
+
+}
+
+.metric-container {
+
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+
+}
+
+.metric-card {
+
+  flex: 1;
+  min-width: 220px;
+  background: #151823;
+  border-radius: 16px;
+  padding: 25px;
+  border: 1px solid #2e3250;
+  text-align: center;
+
+}
+
+.metric-card h3 {
+
+  color: #8b92b8;
+  margin-bottom: 10px;
+
+}
+
+.metric-card p {
+
+  font-size: 28px;
+  font-weight: bold;
+  color: white;
+
+}
+
+table {
+
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+
+}
+
+table th {
+
+  background: #2e3250;
+  padding: 14px;
+
+}
+
+table td {
+
+  padding: 12px;
+  text-align: center;
+
+}
+
+table tr:nth-child(even) {
+
+  background: #1a1d2b;
+
+}
+
+input[type="range"] {
+
+  width: 100%;
+  margin-top: 20px;
+
+}
+
+input[type="file"] {
+
+  margin-top: 20px;
+  color: white;
+
+}
+
+.prediction-results {
+
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+
+}
+
+.result-card {
+
+  flex: 1;
+  min-width: 220px;
+  background: #151823;
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid #2e3250;
+  text-align: center;
+
+}
+
+.result-card h3 {
+
+  color: #8b92b8;
+
+}
+
+.result-card p {
+
+  font-size: 24px;
+  font-weight: bold;
+
+}
+
