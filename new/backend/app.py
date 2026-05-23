@@ -2,7 +2,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
 import subprocess
-from XAI_in_predictive_maintenance.new.backend.ml_pipeline import *
+from ml_pipeline import *
 import pandas as pd
 from flask import send_file
 import matplotlib
@@ -41,16 +41,15 @@ def simulate():
         [
             "matlab",
             "-batch",
-            "run('C:/project/backend/matlab/simulate.m')"
+            "run('C:/project/XAI_in_predictive_maintenance/new/backend/matlab/simulate.m')"
         ]
     )
 
     print("MATLAB Finished")
 
     df = pd.read_csv(
-        "C:/project/backend/matlab/simulation_output.csv"
-    )
-
+    "C:/project/XAI_in_predictive_maintenance/new/backend/matlab/simulation_output.csv"
+)
     # DAYS
     days = list(range(1, 21))
 
@@ -192,7 +191,7 @@ def simulate():
     plt.tight_layout()
 
     plt.savefig(
-        "C:/project/backend/matlab/graph.png",
+    "C:/project/XAI_in_predictive_maintenance/new/backend/matlab/graph.png",
         dpi=150,
         bbox_inches='tight',
         facecolor=fig.get_facecolor()
@@ -212,7 +211,7 @@ def simulate():
 def graph():
 
     return send_file(
-        "C:/project/backend/matlab/graph.png",
+    "C:/project/XAI_in_predictive_maintenance/new/backend/matlab/graph.png",
         mimetype='image/png'
     )
 
