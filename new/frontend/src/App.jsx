@@ -202,11 +202,18 @@ function App() {
 
   return (
 
-    <div>
+    <div className="App">
 
-      <h1 style={{color:"white"}}>
-        Triplex Pump Predictive Maintenance
+     
+      <h1 className="main-title">
+        ⚙️ Triplex Pump Predictive Maintenance
       </h1>
+
+      <p className="subtitle">
+        Fault Detection · Severity Analysis · RUL Prediction
+      </p>
+
+
 
       <hr />
 
@@ -218,10 +225,18 @@ function App() {
 
           faults.map((fault) => (
 
-            <button
-              key={fault}
-              onClick={() => toggleFault(fault)}
-            >
+           
+          <button
+            key={fault}
+            className={
+              selectedFaults.includes(fault)
+              ? "selected-fault"
+              : ""
+            }
+            onClick={() => toggleFault(fault)}
+          >
+
+
 
               {fault}
 
@@ -314,18 +329,13 @@ function App() {
       }
 
       {
+      <img
+        src={graphUrl}
+        alt="Simulation Graph"
+        className="graph-image"
+      />}
 
-        graphUrl && (
 
-          <img
-            src={graphUrl}
-            alt="Simulation Graph"
-            width="700"
-          />
-
-        )
-
-      }
 
       <h2>
 
