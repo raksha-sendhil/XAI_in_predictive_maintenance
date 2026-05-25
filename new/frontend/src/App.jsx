@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import "./App.css";
 
@@ -6,21 +5,17 @@ function App() {
 
   const [selectedFaults, setSelectedFaults] = useState([]);
   const [dataset, setDataset] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [currentDay, setCurrentDay] = useState(1);
   const [simulationStatus, setSimulationStatus] = useState("");
   const [predictionResult, setPredictionResult] = useState(null);
-  const [progress, setProgress] = useState(0);
   const [graphUrl, setGraphUrl] = useState("");
-  const [rul, setRul] = useState(0);
-  const [showSimulationImage, setShowSimulationImage] = useState(false);
+  
 
   const faults = [
     "BearingFault",
     "BlockingFault",
-    "LeakFault",
-    "CavitationFault"
+    "LeakFault"
   ];
 
   const toggleFault = (fault) => {
@@ -35,57 +30,33 @@ function App() {
 
     else {
 
-      if (selectedFaults.length < 3) {
-
-        setSelectedFaults([
-          ...selectedFaults,
-          fault
-        ]);
-
-      }
+      setSelectedFaults([
+        ...selectedFaults,
+        fault
+      ]);
 
     }
 
   };
 
-  const runSimulation = async () => {
+  // RUN MATLAB SIMULATION
 
-    console.log("Simulation button clicked");
+  const runSimulation = async () => {
 
     if (selectedFaults.length === 0) {
 
       alert("Please select at least one fault");
-
       return;
 
     }
 
-    setLoading(true);
-
-    setShowSimulationImage(true);
-
-    setProgress(0);
-
-    setSimulationStatus(
-      "Initializing MATLAB Simulation..."
-    );
+    setSimulationStatus("Running MATLAB Simulation...");
 
     try {
-
-      for (let i = 0; i <= 100; i += 10) {
-
-        setProgress(i);
-
-        await new Promise(
-          (resolve) => setTimeout(resolve, 300)
-        );
-
-      }
 
       const response = await fetch(
         "http://127.0.0.1:5000/simulate",
         {
-
           method: "POST",
 
           headers: {
@@ -94,9 +65,7 @@ function App() {
 
           body: JSON.stringify({
 
-            faults: selectedFaults,
-
-            currentDay: Number(currentDay)
+            faults: selectedFaults
 
           })
 
@@ -109,12 +78,6 @@ function App() {
 
       setDataset(data.dataset);
 
-      setRul(data.minimum_rul);
-
-      setGraphUrl(
-        `http://127.0.0.1:5000/graph?${new Date().getTime()}`
-      );
-
       setSimulationStatus(
         "Simulation Completed Successfully"
       );
@@ -125,22 +88,19 @@ function App() {
 
       console.log(error);
 
-      setSimulationStatus(
-        "Simulation Failed"
-      );
+      setSimulationStatus("Simulation Failed");
 
     }
 
-    setLoading(false);
-
   };
+
+  // UPLOAD CSV
 
   const uploadFile = async () => {
 
     if (!uploadedFile) {
 
-      alert("Please select a file");
-
+      alert("Please select a CSV file");
       return;
 
     }
@@ -165,15 +125,13 @@ function App() {
 
       setDataset(data.dataset);
 
-      setRul(data.minimum_rul);
-
-      setGraphUrl(
-        `http://127.0.0.1:5000/graph?${new Date().getTime()}`
+      setSimulationStatus(
+        "Dataset Uploaded Successfully"
       );
 
     }
 
-    catch(error) {
+    catch (error) {
 
       console.log(error);
 
@@ -181,62 +139,86 @@ function App() {
 
   };
 
+  // PREDICTION
+
   const makePrediction = async () => {
 
-    console.log("Prediction button clicked");
+    try {
 
-    const response = await fetch(
-      "http://127.0.0.1:5000/predict",
-      {
-        method: "POST"
-      }
-    );
+      const response = await fetch(
+        "http://127.0.0.1:5000/predict",
+        {
 
-    const data = await response.json();
+          method: "POST",
 
-    console.log(data);
+          headers: {
+            "Content-Type": "application/json"
+          },
 
-    setPredictionResult(data);
+          body: JSON.stringify({
+
+            currentDay: Number(currentDay)
+
+          })
+
+        }
+      );
+
+      const data = await response.json();
+
+      console.log(data);
+
+      setPredictionResult(data);
+
+      setRul(data.rul);
+
+      setGraphUrl(
+        `http://127.0.0.1:5000/graph?${new Date().getTime()}`
+      );
+
+    }
+
+    catch (error) {
+
+      console.log(error);
+
+    }
 
   };
 
   return (
 
-    <div className="App">
+  <div className="app-container">
 
-     
-      <h1 className="main-title">
-        ⚙️ Triplex Pump Predictive Maintenance
-      </h1>
+    <h1 className="dashboard-title">
+      ⚙️ Predictive Maintenance Dashboard
+    </h1>
 
-      <p className="subtitle">
-        Fault Detection · Severity Analysis · RUL Prediction
-      </p>
+    <p className="dashboard-sub">
+      MATLAB + AI Based Fault Detection & RUL Prediction
+    </p>
 
+    {/* STEP 1 */}
 
+    <div className="section">
 
-      <hr />
+      <h2>1. Select Fault Types</h2>
 
-      <div className="section">
-
-        <h2>Select Fault Types</h2>
+      <div className="fault-buttons">
 
         {
 
           faults.map((fault) => (
 
-           
-          <button
-            key={fault}
-            className={
-              selectedFaults.includes(fault)
-              ? "selected-fault"
-              : ""
-            }
-            onClick={() => toggleFault(fault)}
-          >
-
-
+            <button
+              key={fault}
+              className={
+                selectedFaults.includes(fault)
+                ? "selected-fault"
+                : "fault-btn"
+              }
+              onClick={() => toggleFault(fault)}
+            >
 
               {fault}
 
@@ -246,149 +228,42 @@ function App() {
 
         }
 
-        <p>
-
-          Selected Faults:
-          {selectedFaults.join(", ")}
-
-        </p>
-
       </div>
 
-      <hr />
+      <p className="selected-text">
 
-      <h2>Select Current Operating Day</h2>
-
-      <input
-        type="range"
-        min="1"
-        max="20"
-        value={currentDay}
-        onChange={(e) =>
-          setCurrentDay(e.target.value)
-        }
-      />
-
-      <p>
-
-        Current Day: {currentDay}
+        Selected Faults:
+        {" "}
+        {selectedFaults.join(", ") || "None"}
 
       </p>
 
-      <hr />
+    </div>
 
-      <h2>Simulation Controls</h2>
+    {/* STEP 2 */}
 
-      <button onClick={runSimulation}>
+    <div className="section">
 
-        Run Simulations
+      <h2>2. Run MATLAB Simulation</h2>
+
+      <button
+        className="main-btn"
+        onClick={runSimulation}
+      >
+
+        Run Simulation
 
       </button>
 
       <p>{simulationStatus}</p>
 
-      {
+    </div>
 
-        loading &&
+    {/* STEP 3 */}
 
-        <div>
+    <div className="section">
 
-          <progress
-            value={progress}
-            max="100"
-            style={{
-              width:"700px",
-              height:"30px"
-            }}
-          />
-
-          <p>
-
-            Simulation Progress: {progress}%
-
-          </p>
-
-        </div>
-
-      }
-
-      <hr />
-
-      <h2>Simulation Graphs</h2>
-
-      {
-
-        showSimulationImage &&
-
-        <img
-          src="/pump.png"
-          width="500"
-          alt="Pump"
-        />
-
-      }
-
-      {
-      <img
-        src={graphUrl}
-        alt="Simulation Graph"
-        className="graph-image"
-      />}
-
-
-
-      <h2>
-
-        Estimated RUL: {rul} Days
-
-      </h2>
-
-      <hr />
-
-      <h2>Generated Dataset</h2>
-
-      <table border="1">
-
-        <thead>
-
-          <tr>
-
-            <th>Time</th>
-            <th>Pressure</th>
-            <th>Temperature</th>
-            <th>Fault</th>
-
-          </tr>
-
-        </thead>
-
-        <tbody>
-
-          {
-
-            dataset &&
-            dataset.map((item, index) => (
-
-              <tr key={index}>
-
-                <td>{item.time}</td>
-                <td>{item.pressure}</td>
-                <td>{item.temperature}</td>
-                <td>{item.fault}</td>
-
-              </tr>
-
-            ))
-
-          }
-
-        </tbody>
-
-      </table>
-
-      <hr />
-
-      <h2>Upload Existing Simulation File</h2>
+      <h2>3. Upload Existing CSV File</h2>
 
       <input
         type="file"
@@ -405,63 +280,179 @@ function App() {
 
       }
 
-      <button onClick={uploadFile}>
+      <button
+        className="main-btn"
+        onClick={uploadFile}
+      >
 
         Upload Dataset
 
       </button>
 
-      <hr />
+    </div>
 
-      <h2>Prediction Section</h2>
+    {/* STEP 4 */}
 
-      <button onClick={makePrediction}>
+    <div className="section">
+
+      <h2>4. Select Current Operating Day</h2>
+
+      <input
+        type="range"
+        min="1"
+        max="20"
+        value={currentDay}
+        onChange={(e) =>
+          setCurrentDay(e.target.value)
+        }
+        className="slider"
+      />
+
+      <p>
+
+        Current Day:
+        {" "}
+        {currentDay}
+
+      </p>
+
+    </div>
+
+    {/* STEP 5 */}
+
+    <div className="section">
+
+      <h2>5. Run Prediction</h2>
+
+      <button
+        className="main-btn"
+        onClick={makePrediction}
+      >
 
         Make Prediction
 
       </button>
 
-      {
+    </div>
 
-        predictionResult && (
+    {/* GRAPH */}
 
-          <div className="prediction-results">
+    {
 
-            <div className="result-card">
+      graphUrl && (
 
-              <h3>Detected Fault</h3>
+        <div className="section">
 
-              <p>{predictionResult.fault}</p>
+          <h2>RUL Prediction Graph</h2>
 
-            </div>
+          <img
+            src={graphUrl}
+            alt="Simulation Graph"
+            className="graph-image"
+          />
 
-            <div className="result-card">
+        </div>
 
-              <h3>Remaining Useful Life</h3>
+      )
 
-              <p>{predictionResult.rul} Days</p>
+    }
 
-            </div>
+    {/* RESULTS */}
 
-            <div className="result-card">
+    {
 
-              <h3>Current Day</h3>
+      predictionResult && (
 
-              <p>{predictionResult.current_day}</p>
+        <div className="prediction-results">
 
-            </div>
+          <div className="result-card">
+
+            <h3>Detected Fault</h3>
+
+            <p>{predictionResult.fault}</p>
 
           </div>
 
-        )
+          <div className="result-card">
 
-      }
+            <h3>Remaining Useful Life</h3>
 
-    </div>
+            <p>{predictionResult.rul} Days</p>
 
-  );
+          </div>
+
+          <div className="result-card">
+
+            <h3>Current Day</h3>
+
+            <p>{predictionResult.current_day}</p>
+
+          </div>
+
+        </div>
+
+      )
+
+    }
+
+    {/* DATASET */}
+
+    {
+
+      dataset.length > 0 && (
+
+        <div className="section">
+
+          <h2>Generated Dataset</h2>
+
+          <table>
+
+            <thead>
+
+              <tr>
+
+                <th>Time</th>
+                <th>Pressure</th>
+                <th>Temperature</th>
+                <th>Fault</th>
+
+              </tr>
+
+            </thead>
+
+            <tbody>
+
+              {
+
+                dataset.map((item, index) => (
+
+                  <tr key={index}>
+
+                    <td>{item.time}</td>
+                    <td>{item.pressure}</td>
+                    <td>{item.temperature}</td>
+                    <td>{item.fault}</td>
+
+                  </tr>
+
+                ))
+
+              }
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      )
+
+    }
+
+  </div>
+
+);
 
 }
 
 export default App;
-
