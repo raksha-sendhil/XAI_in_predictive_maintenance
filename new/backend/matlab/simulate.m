@@ -7,10 +7,10 @@ fault = repmat("Bearing Fault",20,1);
 
 T = table(time, pressure, temperature, fault);
 
-writetable(T, 'C:/project/backend/matlab/simulation_output.csv');
+writetable(T, 'C:/project/XAI_in_predictive_maintenance/new/backend/matlab/simulation_output.csv');
 
 
 
-saveas(gcf, 'C:/project/backend/matlab/graph.png');
+
 
 disp("CSV Generated")

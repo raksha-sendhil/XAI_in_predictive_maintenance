@@ -6,6 +6,7 @@ from ml_pipeline import *
 import pandas as pd
 from flask import send_file
 import matplotlib
+import os
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -23,33 +24,24 @@ def home():
 
 
 
+
+
 @app.route('/simulate', methods=['POST'])
 def simulate():
 
-    print("Starting MATLAB...")
+    print("Opening MATLAB...")
 
-    data = request.json
+    matlab_path = r"C:\Program Files\MATLAB\R2026a\bin\matlab.exe"
 
-    selected_faults = data['faults']
+    subprocess.Popen([
+        matlab_path,
+        "-r",
+        "run('C:/project/XAI_in_predictive_maintenance/new/backend/matlab/simulate.m'); exit;"
+    ])
 
-    current_day = data['currentDay']
-
-    print(selected_faults)
-    print(current_day)
-
-    subprocess.run(
-        [
-            "matlab",
-            "-batch",
-            "run('C:/project/XAI_in_predictive_maintenance/new/backend/matlab/simulate.m')"
-        ]
-    )
-
-    print("MATLAB Finished")
-
-    df = pd.read_csv(
-    "C:/project/XAI_in_predictive_maintenance/new/backend/matlab/simulation_output.csv"
-)
+    return jsonify({
+        "message": "Simulation Started"
+    })
     # DAYS
     days = list(range(1, 21))
 
