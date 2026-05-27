@@ -12,15 +12,14 @@ function App() {
   const [activeSection, setActiveSection] = useState("simulation");
   const [liveSyncActive, setLiveSyncActive] = useState(true);
   const [validationGraph, setValidationGraph] = useState("");
+  const [isSimulating, setIsSimulating] = useState(false); // guard against double-clicks
 
   const faults = ["BearingFault", "BlockingFault", "LeakFault"];
 
   const toggleFault = (fault) => {
-    if (selectedFaults.includes(fault)) {
-      setSelectedFaults(selectedFaults.filter((f) => f !== fault));
-    } else {
-      setSelectedFaults([...selectedFaults, fault]);
-    }
+    setSelectedFaults((prev) =>
+      prev.includes(fault) ? prev.filter((f) => f !== fault) : [...prev, fault]
+    );
   };
 
   const runSimulation = async () => {
@@ -28,8 +27,14 @@ function App() {
       alert("Please select at least one fault");
       return;
     }
+    if (isSimulating) return; // prevent double-click during MATLAB run
 
+    setIsSimulating(true);
     setSimulationStatus("running");
+    // Clear previous results so stale graphs don't linger
+    setGraphUrl("");
+    setPredictionResult(null);
+    setValidationGraph("");
 
     try {
       const response = await fetch("http://127.0.0.1:5000/simulate", {
@@ -43,14 +48,18 @@ function App() {
       const data = await response.json();
 
       if (data.dataset) setDataset(data.dataset);
+
+      // Only set graph URL after MATLAB confirms it generated the file
       if (data.graph_generated) {
         setGraphUrl(`http://127.0.0.1:5000/static/rul_graph.png?t=${Date.now()}`);
       }
 
       setSimulationStatus("success");
     } catch (error) {
-      console.log(error);
+      console.error("Simulation error:", error);
       setSimulationStatus("error");
+    } finally {
+      setIsSimulating(false);
     }
   };
 
@@ -75,7 +84,7 @@ function App() {
       setDataset(data.dataset);
       alert("Lifecycle dataset uploaded successfully");
     } catch (error) {
-      console.log(error);
+      console.error("Upload error:", error);
       alert("CSV upload failed");
     }
   };
@@ -91,12 +100,19 @@ function App() {
       if (!response.ok) throw new Error("Prediction failed");
 
       const data = await response.json();
+      const ts = Date.now();
 
       setPredictionResult(data);
-      setValidationGraph(`http://127.0.0.1:5000/validation_graph?currentDay=${Number(currentDay)}&t=${new Date().getTime()}`);
-      setGraphUrl(`http://127.0.0.1:5000/static/rul_graph.png?t=${Date.now()}`);
+
+      // Validation graph: backend renders actual-vs-predicted up to currentDay
+      setValidationGraph(
+        `http://127.0.0.1:5000/validation_graph?currentDay=${Number(currentDay)}&t=${ts}`
+      );
+
+      // Refresh RUL graph with new timestamp so browser doesn't serve cached version
+      setGraphUrl(`http://127.0.0.1:5000/static/rul_graph.png?t=${ts}`);
     } catch (error) {
-      console.log(error);
+      console.error("Prediction error:", error);
       alert("Prediction failed");
     }
   };
@@ -160,7 +176,6 @@ function App() {
           >
             <span className="nav-icon">▸</span> Dataset
           </button>
-          {/* NEW: Explanation / SHAP section */}
           <button
             className={`nav-item ${activeSection === "explanation" ? "active" : ""}`}
             onClick={() => setActiveSection("explanation")}
@@ -219,7 +234,7 @@ function App() {
                 </div>
               </div>
 
-              {/* FAULT SELECTION — full width, no model card beside it */}
+              {/* FAULT SELECTION */}
               <div className="card" style={{ marginBottom: "16px" }}>
                 <div className="card-label">STEP 1 — SELECT FAULT TYPES</div>
                 <div className="fault-grid">
@@ -246,14 +261,20 @@ function App() {
               <div className="cards-row">
                 <div className="card">
                   <div className="card-label">STEP 2 — RUN MATLAB SIMULATION</div>
-                  <button className="primary-action-btn" onClick={runSimulation}>
-                    <span className="btn-icon">▶</span> Run Simulation
+                  <button
+                    className="primary-action-btn"
+                    onClick={runSimulation}
+                    disabled={isSimulating}
+                    style={{ opacity: isSimulating ? 0.6 : 1, cursor: isSimulating ? "not-allowed" : "pointer" }}
+                  >
+                    <span className="btn-icon">{isSimulating ? "⟳" : "▶"}</span>
+                    {isSimulating ? "Running..." : "Run Simulation"}
                   </button>
                   {simulationStatus && (
                     <div className={`status-pill ${simulationStatus}`}>
                       {simulationStatus === "running" && "⟳ Running MATLAB Simulation..."}
                       {simulationStatus === "success" && "✓ Simulation Completed Successfully"}
-                      {simulationStatus === "error" && "✕ Simulation Failed"}
+                      {simulationStatus === "error" && "✕ Simulation Failed — check Flask logs"}
                     </div>
                   )}
                 </div>
@@ -309,7 +330,7 @@ function App() {
               </div>
             </section>
 
-            {/* RUL GRAPH — shown only after prediction, labelled "up to current day" */}
+            {/* RUL GRAPH — shown only after prediction */}
             {predictionResult && graphUrl && (
               <section className="content-section">
                 <div className="card">
@@ -318,7 +339,7 @@ function App() {
                   </div>
                   <p className="graph-sub">
                     Actual vs. Predicted RUL trajectory through Day {currentDay} of operation.
-                    Future days are not shown here — view the full forecast in Validation Suite.
+                    Full forecast is available in the Validation Suite.
                   </p>
                   <div className="graph-legend">
                     <span className="legend-item">
@@ -329,7 +350,18 @@ function App() {
                     </span>
                   </div>
                   <div className="graph-wrap">
-                    <img src={graphUrl} alt="RUL Prediction Graph" className="graph-img" />
+                    <img
+                      src={graphUrl}
+                      alt="RUL Prediction Graph"
+                      className="graph-img"
+                      onError={(e) => {
+                        e.target.style.display = "none";
+                        e.target.nextSibling.style.display = "block";
+                      }}
+                    />
+                    <p style={{ display: "none", color: "var(--color-warning, #f59e0b)", marginTop: 8 }}>
+                      ⚠ Graph image could not be loaded. Ensure Flask is serving /static/rul_graph.png
+                    </p>
                   </div>
                 </div>
               </section>
@@ -404,14 +436,13 @@ function App() {
                         <tr>
                           <th>Severity Column</th>
                           <th>MAE</th>
-                          
                           <th>R²</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr><td>LeakFault</td><td>1.4134e-08</td><td>2.9079e-08</td><td>0.9984</td></tr>
-                        <tr><td>BlockingFault</td><td>7.3234e-04</td><td>1.7210e-03</td><td>0.9992</td></tr>
-                        <tr><td>BearingFault</td><td>2.3627e-06</td><td>6.3440e-06</td><td>0.9975</td></tr>
+                        <tr><td>LeakFault</td><td>1.4134e-08</td><td>0.9984</td></tr>
+                        <tr><td>BlockingFault</td><td>7.3234e-04</td><td>0.9992</td></tr>
+                        <tr><td>BearingFault</td><td>2.3627e-06</td><td>0.9975</td></tr>
                       </tbody>
                     </table>
                   </div>
@@ -434,7 +465,6 @@ function App() {
               </div>
             </div>
 
-            {/* Accuracy metrics only */}
             <div className="card" style={{ marginBottom: "16px" }}>
               <div className="card-label">MODEL ACCURACY METRICS</div>
               <div className="model-metrics">
@@ -444,9 +474,6 @@ function App() {
                     {predictionResult ? "94.2%" : "—"}
                   </span>
                 </div>
-                <div className="metric-row">
-                  
-                </div>
               </div>
               {!predictionResult && (
                 <p className="xai-desc" style={{ marginTop: "10px" }}>
@@ -455,12 +482,22 @@ function App() {
               )}
             </div>
 
-            {/* Validation graph only */}
             <div className="card">
               <div className="card-label">ACCURACY & VALIDATION PLOT</div>
               {validationGraph ? (
                 <div className="graph-wrap">
-                  <img src={validationGraph} alt="Validation Graph" className="graph-img" />
+                  <img
+                    src={validationGraph}
+                    alt="Validation Graph"
+                    className="graph-img"
+                    onError={(e) => {
+                      e.target.style.display = "none";
+                      e.target.nextSibling.style.display = "block";
+                    }}
+                  />
+                  <p style={{ display: "none", color: "var(--color-warning, #f59e0b)", marginTop: 8 }}>
+                    ⚠ Validation graph could not be loaded. Ensure Flask is serving /validation_graph
+                  </p>
                 </div>
               ) : (
                 <div className="empty-state" style={{ padding: "40px 0" }}>
@@ -487,7 +524,6 @@ function App() {
               </div>
             </div>
 
-            {/* Placeholder area for SHAP output */}
             <div className="card">
               <div className="card-label">SHAP FEATURE IMPORTANCE</div>
               {predictionResult ? (
@@ -521,17 +557,6 @@ function App() {
                   </div>
                 </div>
               )}
-            </div>
-
-            {/* Placeholder for SHAP graph/image you'll wire up later */}
-            <div className="card" style={{ marginTop: "16px" }}>
-              <div className="card-label">SHAP SUMMARY PLOT</div>
-              <div className="empty-state" style={{ padding: "40px 0" }}>
-                <div className="empty-icon">◇</div>
-                <div className="empty-text">
-                  SHAP plot will appear here. Wire up your backend endpoint to populate this area.
-                </div>
-              </div>
             </div>
           </section>
         )}
