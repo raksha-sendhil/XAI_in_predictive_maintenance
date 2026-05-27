@@ -933,3 +933,53 @@ html, body, #root {
   font-size: 11px;
   color: var(--text-muted);
 }
+
+
+.metrics-heading {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #e8eaf0;
+  margin: 0 0 12px 0;
+  letter-spacing: 0.01em;
+}
+ 
+.metrics-accuracy-card {
+  background: #181e2e;
+  border: 1px solid #2e3a50;
+  border-radius: 10px;
+  padding: 28px 24px 20px;
+  text-align: center;
+}
+ 
+.metrics-accuracy-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  color: #8b9ab8;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+ 
+.metrics-accuracy-value {
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: #e8eaf0;
+  line-height: 1.1;
+  margin-bottom: 6px;
+}
+ 
+.metrics-accuracy-model {
+  font-size: 0.78rem;
+  color: #5b9cf6;
+  font-family: monospace;
+  letter-spacing: 0.03em;
+}
+ 
+.metrics-table td,
+.metrics-table th {
+  font-size: 0.82rem;
+}
+ 
+.metrics-table td:first-child {
+  font-weight: 500;
+  color: #c9d0e8;
+}

@@ -11,6 +11,7 @@ function App() {
   const [graphUrl, setGraphUrl] = useState("");
   const [activeSection, setActiveSection] = useState("simulation");
   const [liveSyncActive, setLiveSyncActive] = useState(true);
+  const [validationGraph, setValidationGraph] = useState("");
 
   const faults = ["BearingFault", "BlockingFault", "LeakFault"];
 
@@ -23,117 +24,82 @@ function App() {
   };
 
   const runSimulation = async () => {
-  if (selectedFaults.length === 0) {
-    alert("Please select at least one fault");
-    return;
-  }
-
-  setSimulationStatus("running");
-
-  try {
-    const response = await fetch("http://127.0.0.1:5000/simulate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        faults: selectedFaults,
-      }),
-    });
-
-    // backend crashed or matlab crashed
-    if (!response.ok) {
-      throw new Error("Backend simulation failed");
+    if (selectedFaults.length === 0) {
+      alert("Please select at least one fault");
+      return;
     }
 
-    const data = await response.json();
+    setSimulationStatus("running");
 
-    // dataset
-    if (data.dataset) {
-      setDataset(data.dataset);
+    try {
+      const response = await fetch("http://127.0.0.1:5000/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ faults: selectedFaults }),
+      });
+
+      if (!response.ok) throw new Error("Backend simulation failed");
+
+      const data = await response.json();
+
+      if (data.dataset) setDataset(data.dataset);
+      if (data.graph_generated) {
+        setGraphUrl(`http://127.0.0.1:5000/static/rul_graph.png?t=${Date.now()}`);
+      }
+
+      setSimulationStatus("success");
+    } catch (error) {
+      console.log(error);
+      setSimulationStatus("error");
     }
-
-    // graph refresh
-    if (data.graph_generated) {
-      setGraphUrl(`http://127.0.0.1:5000/static/rul_graph.png?t=${Date.now()}`);
-    }
-
-    setSimulationStatus("success");
-  } catch (error) {
-    console.log(error);
-
-    // IMPORTANT
-    // website should NEVER crash
-    setSimulationStatus("error");
-  }
-};
+  };
 
   const uploadFile = async () => {
+    if (!uploadedFile) {
+      alert("Please select CSV file");
+      return;
+    }
 
-  if (!uploadedFile) {
-    alert("Please select CSV file");
-    return;
-  }
+    const formData = new FormData();
+    formData.append("file", uploadedFile);
 
-  const formData = new FormData();
-  formData.append("file", uploadedFile);
-
-  try {
-
-    const response = await fetch(
-      "http://127.0.0.1:5000/upload",
-      {
+    try {
+      const response = await fetch("http://127.0.0.1:5000/upload", {
         method: "POST",
         body: formData,
-      }
-    );
+      });
 
-    if (!response.ok) {
-      throw new Error("Upload failed");
+      if (!response.ok) throw new Error("Upload failed");
+
+      const data = await response.json();
+      setDataset(data.dataset);
+      alert("Lifecycle dataset uploaded successfully");
+    } catch (error) {
+      console.log(error);
+      alert("CSV upload failed");
     }
-
-    const data = await response.json();
-
-    setDataset(data.dataset);
-
-    alert("Lifecycle dataset uploaded successfully");
-
-  } catch (error) {
-
-    console.log(error);
-    alert("CSV upload failed");
-  }
-};
+  };
 
   const makePrediction = async () => {
-  try {
-    const response = await fetch("http://127.0.0.1:5000/predict", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        currentDay: Number(currentDay),
-      }),
-    });
+    try {
+      const response = await fetch("http://127.0.0.1:5000/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentDay: Number(currentDay) }),
+      });
 
-    if (!response.ok) {
-      throw new Error("Prediction failed");
+      if (!response.ok) throw new Error("Prediction failed");
+
+      const data = await response.json();
+
+      setPredictionResult(data);
+      setValidationGraph(`http://127.0.0.1:5000/validation_graph?currentDay=${Number(currentDay)}&t=${new Date().getTime()}`);
+      setGraphUrl(`http://127.0.0.1:5000/static/rul_graph.png?t=${Date.now()}`);
+    } catch (error) {
+      console.log(error);
+      alert("Prediction failed");
     }
-
-    const data = await response.json();
-
-    setPredictionResult(data);
-
-    // reload latest graph
-    setGraphUrl(
-      `http://127.0.0.1:5000/static/rul_graph.png?t=${Date.now()}`
-    );
-  } catch (error) {
-    console.log(error);
-    alert("Prediction failed");
-  }
-};
+  };
 
   const sensorReadings = [
     { label: "Pressure", unit: "bar", value: predictionResult ? "8.42" : "—", icon: "◈", status: "nominal" },
@@ -194,6 +160,13 @@ function App() {
           >
             <span className="nav-icon">▸</span> Dataset
           </button>
+          {/* NEW: Explanation / SHAP section */}
+          <button
+            className={`nav-item ${activeSection === "explanation" ? "active" : ""}`}
+            onClick={() => setActiveSection("explanation")}
+          >
+            <span className="nav-icon">▸</span> Explanation
+          </button>
         </nav>
 
         <div className="sidebar-footer">
@@ -232,83 +205,40 @@ function App() {
           </div>
         </header>
 
-        {/* SIMULATION SECTION */}
-        {(activeSection === "simulation" || activeSection === "validation") && (
+        {/* ─── SIMULATION SECTION ─── */}
+        {activeSection === "simulation" && (
           <>
             <section className="content-section">
               <div className="section-header">
                 <div>
-                  <h1 className="section-title">
-                    {activeSection === "validation"
-                      ? "Model Performance & Validation Suite"
-                      : "Predictive Maintenance Dashboard"}
-                  </h1>
+                  <h1 className="section-title">Predictive Maintenance Dashboard</h1>
                   <p className="section-desc">
-                    Real-time evaluation of predictive algorithms against ground truth telemetry data.
-                    Monitoring LSTM-RNN for anomalies and drift.
+                    Configure fault types, run the MATLAB simulation, and generate RUL predictions
+                    for ALPHA_PLANT_7.
                   </p>
                 </div>
               </div>
 
-              {/* FAULT SELECTION */}
-              <div className="cards-row">
-                <div className="card">
-                  <div className="card-label">STEP 1 — SELECT FAULT TYPES</div>
-                  <div className="fault-grid">
-                    {faults.map((fault) => (
-                      <button
-                        key={fault}
-                        className={`fault-chip ${selectedFaults.includes(fault) ? "fault-chip-active" : ""}`}
-                        onClick={() => toggleFault(fault)}
-                      >
-                        <span className="chip-dot" />
-                        {fault}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="selected-display">
-                    Active faults:{" "}
-                    <span className="selected-value">
-                      {selectedFaults.length > 0 ? selectedFaults.join(", ") : "None selected"}
-                    </span>
-                  </div>
+              {/* FAULT SELECTION — full width, no model card beside it */}
+              <div className="card" style={{ marginBottom: "16px" }}>
+                <div className="card-label">STEP 1 — SELECT FAULT TYPES</div>
+                <div className="fault-grid">
+                  {faults.map((fault) => (
+                    <button
+                      key={fault}
+                      className={`fault-chip ${selectedFaults.includes(fault) ? "fault-chip-active" : ""}`}
+                      onClick={() => toggleFault(fault)}
+                    >
+                      <span className="chip-dot" />
+                      {fault}
+                    </button>
+                  ))}
                 </div>
-
-                {/* MODEL CARD */}
-                <div className="card model-card">
-                  <div className="model-badge production">PRODUCTION</div>
-                  <div className="model-name">LSTM-RNN</div>
-                  <div className="model-metrics">
-                    <div className="metric-row">
-                      <span className="metric-label">Accuracy</span>
-                      <span className="metric-value accent-green">
-                        {predictionResult ? "94.2%" : "—"}
-                      </span>
-                    </div>
-                    <div className="metric-row">
-                      <span className="metric-label">RMSE</span>
-                      <span className="metric-value">
-                        {predictionResult ? "1.42 cycles" : "—"}
-                      </span>
-                    </div>
-                    <div className="metric-row">
-                      <span className="metric-label">MAE</span>
-                      <span className="metric-value">
-                        {predictionResult ? "9.89 cycles" : "—"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="confidence-bar-wrap">
-                    <div className="confidence-label">
-                      Confidence Interval <span>High</span>
-                    </div>
-                    <div className="confidence-bar">
-                      <div
-                        className="confidence-fill"
-                        style={{ width: predictionResult ? "82%" : "0%" }}
-                      />
-                    </div>
-                  </div>
+                <div className="selected-display">
+                  Active faults:{" "}
+                  <span className="selected-value">
+                    {selectedFaults.length > 0 ? selectedFaults.join(", ") : "None selected"}
+                  </span>
                 </div>
               </div>
 
@@ -379,31 +309,16 @@ function App() {
               </div>
             </section>
 
-            {/* SENSOR READINGS */}
-            <section className="content-section">
-              <div className="card-label" style={{ marginBottom: "12px" }}>LIVE SENSOR READINGS</div>
-              <div className="sensors-row">
-                {sensorReadings.map((s) => (
-                  <div key={s.label} className={`sensor-card sensor-${s.status}`}>
-                    <div className="sensor-icon">{s.icon}</div>
-                    <div className="sensor-label">{s.label}</div>
-                    <div className="sensor-value">{s.value}</div>
-                    <div className="sensor-unit">{s.unit}</div>
-                    <div className={`sensor-status-badge ${s.status}`}>
-                      {s.status.toUpperCase()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* RUL GRAPH */}
-            {graphUrl && (
+            {/* RUL GRAPH — shown only after prediction, labelled "up to current day" */}
+            {predictionResult && graphUrl && (
               <section className="content-section">
                 <div className="card">
-                  <div className="card-label">REMAINING USEFUL LIFE (RUL) TRAJECTORY</div>
+                  <div className="card-label">
+                    REMAINING USEFUL LIFE — UP TO DAY {currentDay}
+                  </div>
                   <p className="graph-sub">
-                    Actual vs. Predicted cycles across simulated stress conditions.
+                    Actual vs. Predicted RUL trajectory through Day {currentDay} of operation.
+                    Future days are not shown here — view the full forecast in Validation Suite.
                   </p>
                   <div className="graph-legend">
                     <span className="legend-item">
@@ -415,38 +330,6 @@ function App() {
                   </div>
                   <div className="graph-wrap">
                     <img src={graphUrl} alt="RUL Prediction Graph" className="graph-img" />
-                  </div>
-
-                  {/* XAI SECTION */}
-                  <div className="xai-section">
-                    <div className="xai-header">
-                      <span className="xai-badge">XAI</span>
-                      <span className="xai-title">Explainable AI — Feature Attribution</span>
-                    </div>
-                    <p className="xai-desc">
-                      SHAP-based feature importance showing which sensor inputs most influenced
-                      the RUL prediction for the current operating cycle.
-                    </p>
-                    <div className="xai-factors">
-                      {xaiInsights.map((x) => (
-                        <div key={x.factor} className="xai-row">
-                          <span className="xai-factor">{x.factor}</span>
-                          <div className="xai-bar-wrap">
-                            <div
-                              className={`xai-bar-fill ${x.direction === "up" ? "xai-up" : "xai-down"}`}
-                              style={{ width: `${x.contribution * 2}%` }}
-                            />
-                          </div>
-                          <span className={`xai-pct ${x.direction === "up" ? "xai-up" : "xai-down"}`}>
-                            {x.direction === "up" ? "▲" : "▼"} {x.contribution}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="xai-note">
-                      ⓘ Temperature Spike is the primary degradation driver in the current cycle.
-                      Monitor thermal envelope and cooling system integrity.
-                    </p>
                   </div>
                 </div>
               </section>
@@ -472,10 +355,188 @@ function App() {
                 </div>
               </section>
             )}
+
+            {/* MODEL PERFORMANCE METRICS */}
+            {predictionResult && (
+              <section className="content-section">
+                <div className="card-label" style={{ marginBottom: "18px", letterSpacing: "0.12em" }}>
+                  MODEL PERFORMANCE METRICS
+                </div>
+                <div className="cards-row" style={{ alignItems: "flex-start" }}>
+
+                  {/* ── FAULT CLASSIFIER ── */}
+                  <div style={{ flex: 1 }}>
+                    <h2 className="metrics-heading">Fault Classifier</h2>
+                    <div className="metrics-accuracy-card">
+                      <div className="metrics-accuracy-label">OVERALL ACCURACY</div>
+                      <div className="metrics-accuracy-value">91.63%</div>
+                      <div className="metrics-accuracy-model">RandomForestClassifier</div>
+                    </div>
+                    <table className="data-table metrics-table" style={{ marginTop: "10px" }}>
+                      <thead>
+                        <tr>
+                          <th>Class</th>
+                          <th>Precision</th>
+                          <th>Recall</th>
+                          <th>F1-Score</th>
+                          <th>Support</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr><td>Healthy</td><td>0.780</td><td>0.991</td><td>0.873</td><td>111</td></tr>
+                        <tr><td>LeakFault</td><td>0.989</td><td>0.867</td><td>0.924</td><td>105</td></tr>
+                        <tr><td>BlockingFault</td><td>0.972</td><td>0.946</td><td>0.959</td><td>111</td></tr>
+                        <tr><td>BearingFault</td><td>0.989</td><td>0.854</td><td>0.917</td><td>103</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* ── FAULT FACTOR REGRESSOR ── */}
+                  <div style={{ flex: 1 }}>
+                    <h2 className="metrics-heading">Fault Factor Regressor</h2>
+                    <div className="metrics-accuracy-card">
+                      <div className="metrics-accuracy-label">OVERALL ACCURACY</div>
+                      <div className="metrics-accuracy-value">99.84%</div>
+                      <div className="metrics-accuracy-model">RandomForestRegressor</div>
+                    </div>
+                    <table className="data-table metrics-table" style={{ marginTop: "10px" }}>
+                      <thead>
+                        <tr>
+                          <th>Severity Column</th>
+                          <th>MAE</th>
+                          
+                          <th>R²</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr><td>LeakFault</td><td>1.4134e-08</td><td>2.9079e-08</td><td>0.9984</td></tr>
+                        <tr><td>BlockingFault</td><td>7.3234e-04</td><td>1.7210e-03</td><td>0.9992</td></tr>
+                        <tr><td>BearingFault</td><td>2.3627e-06</td><td>6.3440e-06</td><td>0.9975</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                </div>
+              </section>
+            )}
           </>
         )}
 
-        {/* SENSOR SECTION */}
+        {/* ─── VALIDATION SECTION ─── */}
+        {activeSection === "validation" && (
+          <section className="content-section">
+            <div className="section-header">
+              <div>
+                <h1 className="section-title">Model Validation Suite</h1>
+                <p className="section-desc">
+                  Model accuracy metrics and validation plot against ground truth telemetry data.
+                </p>
+              </div>
+            </div>
+
+            {/* Accuracy metrics only */}
+            <div className="card" style={{ marginBottom: "16px" }}>
+              <div className="card-label">MODEL ACCURACY METRICS</div>
+              <div className="model-metrics">
+                <div className="metric-row">
+                  <span className="metric-label">Accuracy</span>
+                  <span className="metric-value accent-green">
+                    {predictionResult ? "94.2%" : "—"}
+                  </span>
+                </div>
+                <div className="metric-row">
+                  
+                </div>
+              </div>
+              {!predictionResult && (
+                <p className="xai-desc" style={{ marginTop: "10px" }}>
+                  Run a prediction on the Simulation page to populate accuracy metrics.
+                </p>
+              )}
+            </div>
+
+            {/* Validation graph only */}
+            <div className="card">
+              <div className="card-label">ACCURACY & VALIDATION PLOT</div>
+              {validationGraph ? (
+                <div className="graph-wrap">
+                  <img src={validationGraph} alt="Validation Graph" className="graph-img" />
+                </div>
+              ) : (
+                <div className="empty-state" style={{ padding: "40px 0" }}>
+                  <div className="empty-icon">◈</div>
+                  <div className="empty-text">
+                    No validation graph yet. Run a prediction to generate the plot.
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* ─── EXPLANATION / SHAP SECTION ─── */}
+        {activeSection === "explanation" && (
+          <section className="content-section">
+            <div className="section-header">
+              <div>
+                <h1 className="section-title">Explainable AI — SHAP Analysis</h1>
+                <p className="section-desc">
+                  Feature attribution output from SHAP. Shows which sensor inputs most influenced
+                  the RUL prediction for the current operating cycle.
+                </p>
+              </div>
+            </div>
+
+            {/* Placeholder area for SHAP output */}
+            <div className="card">
+              <div className="card-label">SHAP FEATURE IMPORTANCE</div>
+              {predictionResult ? (
+                <>
+                  <div className="xai-factors" style={{ marginTop: "16px" }}>
+                    {xaiInsights.map((x) => (
+                      <div key={x.factor} className="xai-row">
+                        <span className="xai-factor">{x.factor}</span>
+                        <div className="xai-bar-wrap">
+                          <div
+                            className={`xai-bar-fill ${x.direction === "up" ? "xai-up" : "xai-down"}`}
+                            style={{ width: `${x.contribution * 2}%` }}
+                          />
+                        </div>
+                        <span className={`xai-pct ${x.direction === "up" ? "xai-up" : "xai-down"}`}>
+                          {x.direction === "up" ? "▲" : "▼"} {x.contribution}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="xai-note" style={{ marginTop: "16px" }}>
+                    ⓘ Temperature Spike is the primary degradation driver in the current cycle.
+                    Monitor thermal envelope and cooling system integrity.
+                  </p>
+                </>
+              ) : (
+                <div className="empty-state" style={{ padding: "40px 0" }}>
+                  <div className="empty-icon">◈</div>
+                  <div className="empty-text">
+                    No SHAP output available. Run a prediction first to generate explanations.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Placeholder for SHAP graph/image you'll wire up later */}
+            <div className="card" style={{ marginTop: "16px" }}>
+              <div className="card-label">SHAP SUMMARY PLOT</div>
+              <div className="empty-state" style={{ padding: "40px 0" }}>
+                <div className="empty-icon">◇</div>
+                <div className="empty-text">
+                  SHAP plot will appear here. Wire up your backend endpoint to populate this area.
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ─── SENSOR SECTION ─── */}
         {activeSection === "sensors" && (
           <section className="content-section">
             <div className="section-header">
@@ -508,7 +569,7 @@ function App() {
           </section>
         )}
 
-        {/* DATASET SECTION */}
+        {/* ─── DATASET SECTION ─── */}
         {activeSection === "dataset" && (
           <section className="content-section">
             <div className="section-header">
@@ -547,7 +608,9 @@ function App() {
             ) : (
               <div className="card empty-state">
                 <div className="empty-icon">◈</div>
-                <div className="empty-text">No dataset loaded. Run a simulation or upload a CSV file.</div>
+                <div className="empty-text">
+                  No dataset loaded. Run a simulation or upload a CSV file.
+                </div>
               </div>
             )}
           </section>
