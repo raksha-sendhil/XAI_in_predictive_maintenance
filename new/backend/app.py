@@ -8,10 +8,11 @@ from flask import send_file
 import matplotlib
 import os
 
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-
+uploaded_dataset = None
 
 app = Flask(__name__)
 CORS(app)
@@ -29,19 +30,37 @@ def home():
 @app.route('/simulate', methods=['POST'])
 def simulate():
 
-    print("Opening MATLAB...")
+    try:
+        data = request.json
+        faults = data.get("faults", [])
 
-    matlab_path = r"C:\Program Files\MATLAB\R2026a\bin\matlab.exe"
+        matlab_script = r"C:\project\backend\matlab\simulate.m"
 
-    subprocess.Popen([
-        matlab_path,
-        "-r",
-        "run('C:/project/XAI_in_predictive_maintenance/new/backend/matlab/simulate.m'); exit;"
-    ])
+        # run independently
+        subprocess.Popen([
+            "matlab",
+            "-nosplash",
+            "-nodesktop",
+            "-r",
+            f"run('{matlab_script}');exit;"
+        ])
 
-    return jsonify({
-        "message": "Simulation Started"
-    })
+        return jsonify({
+            "message": "Simulation started successfully"
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+    except Exception as e:
+        print(e)
+
+        return jsonify({
+            "error": str(e)
+        }), 500
     # DAYS
     days = list(range(1, 21))
 
@@ -206,22 +225,93 @@ def graph():
     "C:/project/XAI_in_predictive_maintenance/new/backend/matlab/graph.png",
         mimetype='image/png'
     )
-
 @app.route('/predict', methods=['POST'])
 def predict():
 
-    print("Prediction Started")
+    global uploaded_dataset
 
-    return jsonify({
+    try:
 
-        "fault": "Bearing Fault",
+        if uploaded_dataset is None:
+            return jsonify({
+                "error": "Please upload lifecycle CSV first"
+            }), 400
 
-        "rul": 142,
+        data = request.json
+        current_day = int(data.get("currentDay", 1))
 
-        "current_day": 20
+        df = uploaded_dataset
 
-    })
-    
+        # example logic
+        row = df.iloc[min(current_day - 1, len(df)-1)]
+
+        prediction = {
+            "fault": row["fault"],
+            "rul": max(len(df) - current_day, 0),
+            "current_day": current_day
+        }
+
+        # generate graph
+        plt.figure(figsize=(10,5))
+
+        actual_rul = list(range(len(df), 0, -1))
+        predicted_rul = [x * 0.92 for x in actual_rul]
+
+        plt.plot(actual_rul, label="Actual RUL")
+        plt.plot(predicted_rul, '--', label="Predicted RUL")
+
+        plt.xlabel("Cycle")
+        plt.ylabel("Remaining Useful Life")
+        plt.legend()
+
+        graph_path = "static/rul_graph.png"
+
+        plt.savefig(graph_path)
+        plt.close()
+
+        return jsonify(prediction)
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+        
+        
+@app.route('/upload', methods=['POST'])
+def upload():
+
+    global uploaded_dataset
+
+    try:
+
+        if 'file' not in request.files:
+            return jsonify({
+                "error": "No file uploaded"
+            }), 400
+
+        file = request.files['file']
+
+        if file.filename == '':
+            return jsonify({
+                "error": "Empty filename"
+            }), 400
+
+        # read lifecycle CSV
+        uploaded_dataset = pd.read_csv(file)
+
+        return jsonify({
+            "message": "Lifecycle dataset uploaded successfully",
+            "rows": len(uploaded_dataset),
+            "columns": list(uploaded_dataset.columns),
+            "dataset": uploaded_dataset.head(20).to_dict(orient='records')
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
     
 if __name__ == "__main__":
 
