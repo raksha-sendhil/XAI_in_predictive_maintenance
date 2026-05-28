@@ -131,7 +131,7 @@ app = Flask(__name__, static_folder=str(STATIC_DIR))
 CORS(app)
 
 # ── in-memory state ────────────────────────────────────────────────────────────
-state = {"lifecycle_df": None}
+state = {"lifecycle_df": None, "last_prediction": None, "last_explanation": None}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -499,6 +499,7 @@ def predict():
         response["real_rul"]         = round(real_rul, 2)
         response["rul_error"]        = round(rul_error, 2)
         response["real_lifecycle"]   = int(real_lifecycle)
+    state["last_prediction"] = response
     return jsonify(response)
 
 
@@ -627,11 +628,162 @@ def explain():
         f"({', '.join(candidates)})."
     )
 
-    return jsonify({
+    payload = {
         "fault":        fault_name,
         "explanations": explanations,
         "summary":      overall_summary,
-    })
+    }
+    state["last_explanation"] = payload
+    return jsonify(payload)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROUTE — GET /export
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.route("/export", methods=["GET"])
+def export_report():
+    pred = state.get("last_prediction")
+    if pred is None:
+        return jsonify({"error": "No prediction available. Run a prediction first."}), 400
+
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import cm
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                        Image as RLImage, Table, TableStyle,
+                                        PageBreak, HRFlowable)
+        from io import BytesIO
+        import datetime
+    except ImportError:
+        return jsonify({"error": "reportlab not installed. Run: pip install reportlab"}), 500
+
+    expl = state.get("last_explanation")   # may be None if /explain not yet called
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            rightMargin=2*cm, leftMargin=2*cm,
+                            topMargin=2*cm,  bottomMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    S = {
+        "title": ParagraphStyle("RPT_title", parent=styles["Heading1"],
+                                fontSize=20, alignment=TA_CENTER,
+                                textColor=colors.HexColor("#1a237e"), spaceAfter=4),
+        "sub":   ParagraphStyle("RPT_sub",   parent=styles["Normal"],
+                                fontSize=10, alignment=TA_CENTER,
+                                textColor=colors.grey, spaceAfter=16),
+        "h2":    ParagraphStyle("RPT_h2",    parent=styles["Heading2"],
+                                fontSize=14, textColor=colors.HexColor("#1565c0"),
+                                spaceBefore=14, spaceAfter=6),
+        "h3":    ParagraphStyle("RPT_h3",    parent=styles["Heading3"],
+                                fontSize=11, textColor=colors.HexColor("#0277bd"),
+                                spaceBefore=10, spaceAfter=4),
+        "body":  ParagraphStyle("RPT_body",  parent=styles["Normal"],
+                                fontSize=10, leading=14, spaceAfter=4),
+    }
+
+    def _tbl(data, col_widths, header_row=True):
+        t = Table(data, colWidths=col_widths)
+        style = [
+            ("FONTSIZE",  (0, 0), (-1, -1), 9),
+            ("GRID",      (0, 0), (-1, -1), 0.4, colors.HexColor("#b0bec5")),
+            ("PADDING",   (0, 0), (-1, -1), 6),
+            ("VALIGN",    (0, 0), (-1, -1), "MIDDLE"),
+            ("ROWBACKGROUNDS", (0, 1 if header_row else 0), (-1, -1),
+             [colors.white, colors.HexColor("#f5f5f5")]),
+        ]
+        if header_row:
+            style += [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1565c0")),
+                ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+                ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+            ]
+        else:
+            style += [
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e3f2fd")),
+                ("TEXTCOLOR",  (0, 0), (0, -1), colors.HexColor("#1565c0")),
+                ("FONTNAME",   (0, 0), (0, -1), "Helvetica-Bold"),
+            ]
+        t.setStyle(TableStyle(style))
+        return t
+
+    def _embed(path, max_w=17*cm, max_h=14*cm):
+        img = RLImage(str(path), width=max_w, height=max_h, kind="proportional")
+        return img
+
+    def _safe(text):
+        return (text.replace("—", " - ")
+                    .replace("—", " - ")
+                    .replace("▲", "(+)")
+                    .replace("▼", "(-)"))
+
+    story = []
+
+    # ── Cover / summary ────────────────────────────────────────────────────────
+    story.append(Paragraph("Predictive Maintenance Report", S["title"]))
+    now_str = __import__("datetime").datetime.now().strftime("%Y-%m-%d  %H:%M")
+    story.append(Paragraph(f"Generated: {now_str}", S["sub"]))
+    story.append(HRFlowable(width="100%", thickness=1,
+                            color=colors.HexColor("#1565c0")))
+    story.append(Spacer(1, 0.4*cm))
+
+    story.append(Paragraph("Prediction Summary", S["h2"]))
+    fault = pred.get("fault", "N/A")
+    rul   = pred.get("rul")
+    cd    = pred.get("current_day", "N/A")
+
+    summary_rows = [
+        ["Detected Fault",          str(fault)],
+        ["Current Operating Day",   f"{cd} days"],
+        ["Predicted RUL",           f"{rul} days" if rul is not None else "N/A (Healthy)"],
+    ]
+    story.append(_tbl(summary_rows, [6*cm, 10*cm], header_row=False))
+
+    # ── RUL prediction graph ────────────────────────────────────────────────────
+    rul_path = STATIC_DIR / "rul_graph.png"
+    if rul_path.exists():
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph("RUL Prediction Chart", S["h2"]))
+        story.append(Paragraph(
+            "Predicted severity degradation curves with power-law extrapolation "
+            "to end of life for all active fault types.", S["body"]))
+        story.append(Spacer(1, 0.3*cm))
+        story.append(_embed(rul_path))
+
+    # ── SHAP explanations ───────────────────────────────────────────────────────
+    if expl:
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph("SHAP Feature Attribution Analysis", S["h2"]))
+        story.append(Paragraph(_safe(expl.get("summary", "")), S["body"]))
+        story.append(Spacer(1, 0.3*cm))
+
+        for block in expl.get("explanations", []):
+            sev = block.get("severity", "")
+            story.append(Paragraph(f"{sev} Severity", S["h3"]))
+            story.append(Paragraph(_safe(block.get("summary", "")), S["body"]))
+            story.append(Spacer(1, 0.15*cm))
+
+            feat_rows = [["Feature", "Direction", "Importance %"]]
+            for f in block.get("features", []):
+                direction = "Increased" if f["direction"] == "up" else "Decreased"
+                feat_rows.append([f["label"], direction, f"{f['pct']}%"])
+            story.append(_tbl(feat_rows, [8*cm, 4.5*cm, 3.5*cm]))
+            story.append(Spacer(1, 0.25*cm))
+
+            for f in block.get("features", []):
+                story.append(Paragraph(f"  - {_safe(f['text'])}", S["body"]))
+            story.append(Spacer(1, 0.4*cm))
+
+    doc.build(story)
+    buf.seek(0)
+
+    ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
+    return send_file(buf, mimetype="application/pdf",
+                     as_attachment=True,
+                     download_name=f"pm_report_{ts}.pdf")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

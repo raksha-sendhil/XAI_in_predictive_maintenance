@@ -121,6 +121,27 @@ function App() {
   };
 
 
+  const exportReport = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:5000/export");
+      if (!response.ok) {
+        const err = await response.json();
+        alert(`Export failed: ${err.error}`);
+        return;
+      }
+      const blob = await response.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = "predictive_maintenance_report.pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Export failed:", error);
+      alert("Export failed. Check Flask backend.");
+    }
+  };
+
   const fetchExplanation = async () => {
     setIsLoadingExplanation(true);
     try {
@@ -210,7 +231,7 @@ function App() {
             </button>
           </div>
           <div className="topbar-actions">
-            <button className="action-btn">⬆ Export Report</button>
+            <button className="action-btn" onClick={exportReport}>⬆ Export Report</button>
             <button
               className={`live-btn ${liveSyncActive ? "live-on" : ""}`}
               onClick={() => setLiveSyncActive(!liveSyncActive)}
