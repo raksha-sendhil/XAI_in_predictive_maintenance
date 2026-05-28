@@ -4,406 +4,379 @@ app.py — Flask backend for Predictive Maintenance Dashboard
 =============================================================
 Flow
 ----
-1. POST /upload          — User uploads lifecycle CSV (e.g. days 1-39)
-2. POST /simulate        — MATLAB runs ONE day simulation for the selected faults
-                           → MATLAB output is appended as the LAST row to the
-                             uploaded lifecycle CSV → merged CSV stored in memory
-3. POST /predict         — ML models predict RUL on the FULL merged lifecycle
-                             (days 1-39 from CSV  +  day 40 from MATLAB)
-4. GET  /validation_graph — Returns actual-vs-predicted RUL plot as PNG
-5. GET  /static/rul_graph.png — Standard RUL graph (served by Flask static)
+1. POST /upload          — User uploads lifecycle CSV
+2. POST /simulate        — MATLAB runs simulation for selected faults
+3. POST /predict         — Phase-3 RF models run on uploaded CSV:
+                             • classifier → majority-vote fault class (0-7)
+                             • regressor  → predicted severity for all 3 columns
+                             • power-law curve fit per active fault severity
+                             • RUL = min(lifecycle) − current_day across active faults
+                             → saves severity-vs-days plot to static/rul_graph.png
+4. GET  /validation_graph — Returns rul_graph.png as PNG
+5. GET  /static/rul_graph.png — Standard static serving
 """
- 
-import io
-import os
-import subprocess
-import tempfile
+
 import traceback
+from collections import Counter
 from pathlib import Path
- 
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import joblib
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
- 
-# ── paths ──────────────────────────────────────────────────────────────────
+from scipy.optimize import curve_fit
+from scipy.ndimage import uniform_filter1d
+
+# ── paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
- 
-MATLAB_SCRIPT = BASE_DIR / "run_simulation.m"   # your existing MATLAB script
-MATLAB_OUT    = BASE_DIR / "matlab_output.csv"  # MATLAB writes its row(s) here
- 
+MATLAB_DIR = BASE_DIR / "matlab"
+PHASE3_DIR = BASE_DIR.parent.parent / "phase_3"
+
+# ── model constants ────────────────────────────────────────────────────────────
+FEATURE_COLS = [
+    'fPeak', 'pLow', 'pMid', 'pHigh', 'pKurtosis',
+    'qMean', 'qVar', 'qSkewness', 'qKurtosis',
+    'qPeak2Peak', 'qCrest', 'qRMS', 'qMAD', 'qCSRange'
+]
+SEVERITY_COLS = ['LeakFault', 'BlockingFault', 'BearingFault']
+
+FAULT_NAMES = {
+    0: 'Healthy',
+    1: 'LeakFault',
+    2: 'BlockingFault',
+    3: 'BearingFault',
+    4: 'Leak+Block',
+    5: 'Block+Bearing',
+    6: 'Bearing+Leak',
+    7: 'AllFaults',
+}
+
+# Which severity columns are active (and need RUL fitting) per fault class
+FAULT_ACTIVE_SEVERITIES = {
+    0: [],
+    1: ['LeakFault'],
+    2: ['BlockingFault'],
+    3: ['BearingFault'],
+    4: ['LeakFault', 'BlockingFault'],
+    5: ['BlockingFault', 'BearingFault'],
+    6: ['BearingFault', 'LeakFault'],
+    7: ['LeakFault', 'BlockingFault', 'BearingFault'],
+}
+
+# Per-severity degradation direction and plot colour
+SEVERITY_CONFIG = {
+    'LeakFault':     dict(decreasing=False, color='#ef5350'),
+    'BlockingFault': dict(decreasing=True,  color='#ffa726'),
+    'BearingFault':  dict(decreasing=False, color='#42a5f5'),
+}
+
+ALPHA_LB = 1.0
+ALPHA_UB = 4.0
+L_MAX    = 500
+
+# ── load phase-3 models once at startup ───────────────────────────────────────
+try:
+    _classifier = joblib.load(PHASE3_DIR / "fault_classifier.pkl")
+    _regressor  = joblib.load(PHASE3_DIR / "fault_regressor.pkl")
+    _scaler     = joblib.load(PHASE3_DIR / "feature_scaler.pkl")
+    _model_err  = None
+except Exception as e:
+    _classifier = _regressor = _scaler = None
+    _model_err  = str(e)
+
+# ── fault → MATLAB script index mapping ───────────────────────────────────────
+_FAULT_MAP = {
+    frozenset():                                               0,
+    frozenset(["LeakFault"]):                                  1,
+    frozenset(["BlockingFault"]):                              2,
+    frozenset(["BearingFault"]):                               3,
+    frozenset(["LeakFault", "BlockingFault"]):                 4,
+    frozenset(["BlockingFault", "BearingFault"]):              5,
+    frozenset(["BearingFault", "LeakFault"]):                  6,
+    frozenset(["LeakFault", "BlockingFault", "BearingFault"]): 7,
+}
+
+
+def faults_to_script_index(faults: list) -> int:
+    key = frozenset(faults)
+    if key not in _FAULT_MAP:
+        raise ValueError(f"Unknown fault combination: {sorted(faults)}")
+    return _FAULT_MAP[key]
+
+
 app = Flask(__name__, static_folder=str(STATIC_DIR))
 CORS(app)
- 
-# ── in-memory state ────────────────────────────────────────────────────────
-state = {
-    "lifecycle_df":  None,   # uploaded CSV (days 1..N-1)
-    "matlab_df":     None,   # MATLAB-produced last day
-    "merged_df":     None,   # lifecycle_df + matlab_df  (full lifecycle)
-    "model_clf":     None,   # fault classifier
-    "model_reg":     None,   # RUL regressor
-    "label_enc":     None,   # LabelEncoder for fault column
-    "feature_cols":  None,   # column names used for training
-}
- 
- 
-# ═══════════════════════════════════════════════════════════════════════════
-# HELPER — run MATLAB
-# ═══════════════════════════════════════════════════════════════════════════
-def run_matlab(faults: list[str]) -> pd.DataFrame:
 
-    matlab_path = r"C:\Program Files\MATLAB\R2026a\bin\matlab.exe"
+# ── in-memory state ────────────────────────────────────────────────────────────
+state = {"lifecycle_df": None}
 
-    faults_cell = "{'" + "','".join(faults) + "'}"
 
-    command = (
-        f"faults={faults_cell}; "
-        f"run('{MATLAB_SCRIPT.as_posix()}'); "
-        f"exit;"
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPER — run MATLAB simulation
+# ═══════════════════════════════════════════════════════════════════════════════
+def run_matlab(faults: list) -> None:
+    import subprocess
+    matlab_path   = r"C:\Program Files\MATLAB\R2025b\bin\matlab.exe"
+    script_index  = faults_to_script_index(faults)
+    matlab_script = MATLAB_DIR / f"run_{script_index}.m"
+    if not matlab_script.exists():
+        raise FileNotFoundError(f"MATLAB script not found: {matlab_script}")
+    script_dir = matlab_script.parent.as_posix()
+    command    = f"cd('{script_dir}'); run('{matlab_script.as_posix()}'); exit;"
+    subprocess.Popen([matlab_path, "-nosplash", "-r", command]).wait()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPER — power-law RUL fit for one severity column
+# ═══════════════════════════════════════════════════════════════════════════════
+def fit_rul_for_severity(days_all: np.ndarray, sev_all: np.ndarray,
+                         sev_col: str, up_to_day: float) -> dict:
+    cfg        = SEVERITY_CONFIG[sev_col]
+    decreasing = cfg['decreasing']
+
+    S_first = float(sev_all[0])
+    S_last  = float(sev_all[-1])
+
+    S_max, S_min = (S_first, S_last) if decreasing else (S_last, S_first)
+    S_threshold  = S_last
+    denom        = S_max - S_min
+
+    if denom <= 0:
+        raise ValueError(f"No degradation trend in predicted {sev_col} severity "
+                         f"(S_max={S_max:.4e} <= S_min={S_min:.4e}).")
+
+    mask = days_all <= up_to_day
+    if mask.sum() < 3:
+        raise ValueError(f"Fewer than 3 data points up to day {up_to_day} for {sev_col}.")
+    days_hist = days_all[mask].astype(float)
+    sev_hist  = sev_all[mask].astype(float)
+
+    smoothed   = uniform_filter1d(sev_hist, size=3, mode='nearest')
+    norm_t_eff = ((S_max - smoothed) / denom) if decreasing else ((smoothed - S_min) / denom)
+    norm_t_eff = np.clip(norm_t_eff, 1e-12, 1.0 - 1e-12)
+
+    def power_law(d, L, alpha):
+        return np.clip(d / L, 0.0, 1.0) ** alpha
+
+    best_fit, _ = curve_fit(
+        power_law, days_hist, norm_t_eff,
+        p0=[up_to_day * 1.5, (ALPHA_LB + ALPHA_UB) / 2.0],
+        bounds=([up_to_day + 1, ALPHA_LB], [L_MAX, ALPHA_UB]),
+        method='trf', maxfev=50_000,
     )
+    L_pred, alpha_pred = best_fit
+    RUL_pred           = L_pred - up_to_day
 
-    process = subprocess.Popen([
-        matlab_path,
-        "-nosplash",
-        "-r",
-        command
-    ])
+    x_max      = int(np.ceil(max(L_pred, days_all[-1]) + 5))
+    plot_days  = np.arange(1, x_max + 1, dtype=float)
+    norm_fit   = power_law(plot_days, L_pred, alpha_pred)
+    sev_fit    = (S_max - denom * norm_fit) if decreasing else (S_min + denom * norm_fit)
 
-    # wait until matlab closes
-    process.wait()
+    return {
+        'L_pred':      L_pred,
+        'alpha_pred':  alpha_pred,
+        'RUL_pred':    RUL_pred,
+        'current_day': up_to_day,
+        'S_threshold': S_threshold,
+        'S_min':       S_min,
+        'S_max':       S_max,
+        'decreasing':  decreasing,
+        'days_hist':   days_hist,
+        'sev_hist':    sev_hist,
+        'plot_days':   plot_days,
+        'sev_fit':     sev_fit,
+    }
 
-    if not MATLAB_OUT.exists():
-        raise FileNotFoundError(
-            f"MATLAB output file not found: {MATLAB_OUT}"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPER — severity vs days plot for all active faults
+# ═══════════════════════════════════════════════════════════════════════════════
+def generate_rul_plot(rul_results: dict, fault_name: str) -> None:
+    n = len(rul_results)
+    fig, axes = plt.subplots(n, 1, figsize=(11, 4.5 * n),
+                             facecolor='#0f1117', squeeze=False)
+
+    for ax, (sev_col, r) in zip(axes[:, 0], rul_results.items()):
+        color = SEVERITY_CONFIG[sev_col]['color']
+        ax.set_facecolor('#0f1117')
+        for spine in ax.spines.values():
+            spine.set_color('#2e3250')
+        ax.tick_params(colors='#8b92b8')
+        ax.xaxis.label.set_color('#8b92b8')
+        ax.yaxis.label.set_color('#8b92b8')
+        ax.grid(True, linestyle='--', alpha=0.25, color='#2e3250')
+
+        ax.scatter(r['days_hist'], r['sev_hist'], s=30, color=color,
+                   zorder=5, alpha=0.7, label='Predicted severity (history)')
+
+        mask_past = r['plot_days'] <= r['current_day']
+        ax.plot(r['plot_days'][mask_past], r['sev_fit'][mask_past],
+                color=color, linewidth=2.2, label='Fitted curve')
+
+        mask_fut = r['plot_days'] >= r['current_day']
+        ax.plot(r['plot_days'][mask_fut], r['sev_fit'][mask_fut],
+                color=color, linewidth=2.2, linestyle='--',
+                label=f"Extrapolated → RUL = {r['RUL_pred']:.1f} days")
+
+        ax.axvline(r['current_day'], color='#ce93d8', linestyle=':', linewidth=1.8,
+                   label=f"Current day ({int(r['current_day'])})")
+        ax.axhline(r['S_threshold'], color='#ef5350', linestyle='-', linewidth=1.4,
+                   label=f"Failure threshold ({r['S_threshold']:.3g})")
+        ax.axvline(r['L_pred'], color='#ff8a65', linestyle='--', linewidth=1.4,
+                   label=f"Predicted EOL (day {r['L_pred']:.1f})")
+
+        ax.set_title(
+            f"{sev_col}  |  Lifecycle = {r['L_pred']:.1f} days  |  α = {r['alpha_pred']:.3f}",
+            color='#e8eaf0', fontsize=11, pad=8,
         )
+        ax.set_xlabel('Days in Operation', fontsize=10)
+        ax.set_ylabel('Fault Severity', fontsize=10)
+        ylim_lo = r['S_min'] * 0.95 if r['decreasing'] else 0
+        ylim_hi = r['S_max'] * 1.05 if r['decreasing'] else r['S_max'] * 1.1
+        ax.set_ylim(ylim_lo, ylim_hi)
+        ax.legend(loc='best', fontsize=8, facecolor='#1c1f2e',
+                  edgecolor='#2e3250', labelcolor='#c5cae9')
 
-    df = pd.read_csv(MATLAB_OUT)
-
-    return df
- 
- 
-# ═══════════════════════════════════════════════════════════════════════════
-# HELPER — train / retrain models on merged data
-# ═══════════════════════════════════════════════════════════════════════════
-def train_models(df: pd.DataFrame):
-    """
-    Trains RandomForest classifier (fault type) and regressor (RUL).
-    Expects columns:  <sensor cols...>,  fault,  rul
-    Adjust feature_cols to match YOUR CSV column names.
-    """
-    df = df.copy().dropna()
- 
-    # Detect feature columns = everything except 'fault' and 'rul'
-    exclude = {"fault", "rul", "day", "time", "timestamp"}
-    feature_cols = [c for c in df.columns if c.lower() not in exclude]
- 
-    le = LabelEncoder()
-    df["fault_enc"] = le.fit_transform(df["fault"].astype(str))
- 
-    X = df[feature_cols].values
-    y_cls = df["fault_enc"].values
-    y_reg = df["rul"].values
- 
-    X_tr, X_te, yc_tr, yc_te, yr_tr, yr_te = train_test_split(
-        X, y_cls, y_reg, test_size=0.2, random_state=42
-    )
- 
-    clf = RandomForestClassifier(n_estimators=100, random_state=42)
-    clf.fit(X_tr, yc_tr)
- 
-    reg = RandomForestRegressor(n_estimators=100, random_state=42)
-    reg.fit(X_tr, yr_tr)
- 
-    state["model_clf"]    = clf
-    state["model_reg"]    = reg
-    state["label_enc"]    = le
-    state["feature_cols"] = feature_cols
- 
-    return clf, reg, le, feature_cols
- 
- 
-# ═══════════════════════════════════════════════════════════════════════════
-# HELPER — generate RUL graph and save to static/
-# ═══════════════════════════════════════════════════════════════════════════
-def generate_rul_graph(df: pd.DataFrame, predicted_rul_series: np.ndarray):
-    days = np.arange(1, len(df) + 1)
-    actual_rul = df["rul"].values if "rul" in df.columns else np.zeros(len(df))
- 
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(days, actual_rul,          color="#22d3ee", linewidth=2,   label="Actual RUL")
-    ax.plot(days, predicted_rul_series, color="#f59e0b", linewidth=2,
-            linestyle="--", label="Predicted RUL")
- 
-    # Highlight the last (MATLAB-added) day
-    ax.axvline(x=days[-1], color="#f43f5e", linestyle=":", linewidth=1.5,
-               label=f"MATLAB Day ({days[-1]})")
- 
-    ax.set_xlabel("Operating Day")
-    ax.set_ylabel("RUL (days)")
-    ax.set_title("Remaining Useful Life — Full Lifecycle")
-    ax.legend()
-    ax.set_facecolor("#0f172a")
-    fig.patch.set_facecolor("#0f172a")
-    ax.tick_params(colors="white")
-    ax.xaxis.label.set_color("white")
-    ax.yaxis.label.set_color("white")
-    ax.title.set_color("white")
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#334155")
- 
-    fig.tight_layout()
-    fig.savefig(str(STATIC_DIR / "rul_graph.png"), dpi=120, bbox_inches="tight")
+    fig.suptitle(f'RUL Prediction — {fault_name}', color='#e8eaf0', fontsize=13)
+    plt.tight_layout()
+    fig.savefig(str(STATIC_DIR / "rul_graph.png"), dpi=120,
+                bbox_inches='tight', facecolor='#0f1117')
     plt.close(fig)
- 
- 
-# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ROUTE — POST /upload
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 @app.route("/upload", methods=["POST"])
 def upload():
-    """
-    Accepts the lifecycle CSV (days 1..N-1).
-    Stores it in state['lifecycle_df'].
-    Does NOT merge yet — merge happens after /simulate.
-    """
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
- 
+
     f = request.files["file"]
     try:
         df = pd.read_csv(f)
     except Exception as e:
         return jsonify({"error": f"Could not parse CSV: {e}"}), 400
- 
+
     state["lifecycle_df"] = df
-    state["matlab_df"]    = None   # reset stale MATLAB data
-    state["merged_df"]    = None
- 
-    # Return first 100 rows for the Dataset table in the UI
+
     preview = df.head(100)
-    records = []
-    for _, row in preview.iterrows():
-        records.append({
-            "time":        str(row.get("time", row.get("day", row.name))),
-            "pressure":    round(float(row.get("pressure", 0)), 4) if "pressure" in row else "—",
-            "temperature": round(float(row.get("temperature", 0)), 4) if "temperature" in row else "—",
-            "fault":       str(row.get("fault", "—")),
-        })
- 
+    records = [
+        {col: (round(float(v), 4) if hasattr(v, "__float__") and str(v) not in ("nan", "inf")
+               else str(v))
+         for col, v in row.items()}
+        for _, row in preview.iterrows()
+    ]
+
     return jsonify({
-        "message":      f"Uploaded {len(df)} rows (days 1–{len(df)})",
-        "total_rows":   len(df),
-        "dataset":      records,
+        "message":    f"Uploaded {len(df)} rows",
+        "total_rows": len(df),
+        "dataset":    records,
     })
- 
- 
-# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ROUTE — POST /simulate
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 @app.route("/simulate", methods=["POST"])
 def simulate():
-    """
-    1. Runs MATLAB for the selected faults (produces ONE day of sensor data).
-    2. Appends that MATLAB row to the uploaded lifecycle CSV.
-    3. Saves the merged DataFrame in state['merged_df'].
-    4. Trains models on the merged data.
-    5. Generates the RUL graph.
-    """
     body   = request.get_json(force=True)
     faults = body.get("faults", [])
- 
-    if not faults:
-        return jsonify({"error": "No faults selected"}), 400
- 
-    if state["lifecycle_df"] is None:
-        return jsonify({
-            "error": "No lifecycle CSV uploaded yet. "
-                     "Upload your CSV first (Steps 1-3), then run the simulation."
-        }), 400
- 
-    # ── 1. Run MATLAB ──────────────────────────────────────────────────────
     try:
-        matlab_df = run_matlab(faults)
+        run_matlab(faults)
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"MATLAB failed: {str(e)}"}), 500
- 
-    state["matlab_df"] = matlab_df
- 
-    # ── 2. Align MATLAB columns with lifecycle CSV and append ──────────────
-    lifecycle_df = state["lifecycle_df"].copy()
- 
-    # Keep only columns that exist in BOTH dataframes so concat is clean.
-    # Any column in matlab_df but not lifecycle_df is dropped (or vice-versa).
-    common_cols = [c for c in lifecycle_df.columns if c in matlab_df.columns]
- 
-    if not common_cols:
-        return jsonify({
-            "error": "MATLAB output columns do not match the uploaded CSV columns. "
-                     "Ensure your MATLAB script writes the same column headers."
-        }), 500
- 
-    matlab_aligned = matlab_df[common_cols].copy()
-    lifecycle_aligned = lifecycle_df[common_cols].copy()
- 
-    # Tag the MATLAB row with the next day number if a day/time column exists
-    day_col = next((c for c in ["day", "time", "timestamp"] if c in common_cols), None)
-    if day_col:
-        last_day = lifecycle_aligned[day_col].max()
-        matlab_aligned[day_col] = last_day + 1
- 
-    merged_df = pd.concat([lifecycle_aligned, matlab_aligned], ignore_index=True)
-    state["merged_df"] = merged_df
- 
-    # ── 3. Train models on merged data ─────────────────────────────────────
-    try:
-        clf, reg, le, feature_cols = train_models(merged_df)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"error": f"Model training failed: {str(e)}"}), 500
- 
-    # ── 4. Generate RUL graph over the full lifecycle ──────────────────────
-    try:
-        X_all = merged_df[feature_cols].values
-        predicted_rul_all = reg.predict(X_all)
-        generate_rul_graph(merged_df, predicted_rul_all)
-        graph_generated = True
-    except Exception as e:
-        traceback.print_exc()
-        graph_generated = False
- 
-    # ── 5. Build dataset preview for UI ───────────────────────────────────
-    preview = merged_df.tail(20)   # show last 20 rows (includes the new MATLAB day)
-    records = []
-    for _, row in preview.iterrows():
-        records.append({
-            "time":        str(row.get("time", row.get("day", row.name))),
-            "pressure":    round(float(row.get("pressure", 0)), 4) if "pressure" in merged_df.columns else "—",
-            "temperature": round(float(row.get("temperature", 0)), 4) if "temperature" in merged_df.columns else "—",
-            "fault":       str(row.get("fault", "—")),
-        })
- 
-    return jsonify({
-        "message":         f"MATLAB row appended. Merged lifecycle has {len(merged_df)} days.",
-        "total_rows":      len(merged_df),
-        "matlab_day":      int(merged_df.shape[0]),   # the day number of the appended row
-        "graph_generated": graph_generated,
-        "dataset":         records,
-    })
- 
- 
-# ═══════════════════════════════════════════════════════════════════════════
+    return jsonify({"message": "Simulation complete"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ROUTE — POST /predict
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 @app.route("/predict", methods=["POST"])
 def predict():
-    """
-    Predicts fault type and RUL for the LAST row of the merged lifecycle
-    (i.e. the MATLAB-appended day), then returns results.
-    currentDay from the UI is accepted but the prediction always targets
-    the appended MATLAB day (last row).
-    """
-    if state["merged_df"] is None:
-        return jsonify({"error": "No merged dataset. Upload CSV and run simulation first."}), 400
- 
-    if state["model_clf"] is None:
-        return jsonify({"error": "Models not trained yet. Run simulation first."}), 400
- 
-    body        = request.get_json(force=True)
-    current_day = int(body.get("currentDay", len(state["merged_df"])))
- 
-    merged_df    = state["merged_df"]
-    clf          = state["model_clf"]
-    reg          = state["model_reg"]
-    le           = state["label_enc"]
-    feature_cols = state["feature_cols"]
- 
-    # Predict on the last (MATLAB) row
-    last_row = merged_df.iloc[[-1]][feature_cols]
-    fault_enc = clf.predict(last_row)[0]
-    fault_label = le.inverse_transform([fault_enc])[0]
-    rul_pred = float(reg.predict(last_row)[0])
- 
-    # Predict on ALL rows for graph
-    X_all = merged_df[feature_cols].values
-    predicted_rul_all = reg.predict(X_all)
-    generate_rul_graph(merged_df, predicted_rul_all)
- 
+    if state["lifecycle_df"] is None:
+        return jsonify({"error": "No dataset. Upload a lifecycle CSV first."}), 400
+    if _model_err:
+        return jsonify({"error": f"Models failed to load: {_model_err}"}), 500
+
+    body       = request.get_json(force=True)
+    up_to_day  = float(body.get("currentDay", 0))
+
+    df = state["lifecycle_df"].copy()
+
+    missing = [c for c in FEATURE_COLS if c not in df.columns]
+    if missing:
+        return jsonify({"error": f"CSV missing required feature columns: {missing}"}), 400
+
+    if 'current_day' in df.columns:
+        df = df.sort_values('current_day').reset_index(drop=True)
+        days_all = df['current_day'].values.astype(float)
+    else:
+        days_all = np.arange(1, len(df) + 1, dtype=float)
+
+    if up_to_day <= 0:
+        up_to_day = float(days_all[-1])
+
+    X_scaled    = _scaler.transform(df[FEATURE_COLS].values)
+    pred_classes = _classifier.predict(X_scaled)
+    final_class  = int(Counter(pred_classes).most_common(1)[0][0])
+    fault_name   = FAULT_NAMES.get(final_class, str(final_class))
+    active_cols  = FAULT_ACTIVE_SEVERITIES.get(final_class, [])
+
+    if not active_cols:
+        return jsonify({
+            "fault":       fault_name,
+            "rul":         None,
+            "current_day": int(up_to_day),
+        })
+
+    pred_sev = _regressor.predict(X_scaled)   # shape (n_rows, 3)
+    for i, col in enumerate(SEVERITY_COLS):
+        df[f'pred_{col}'] = pred_sev[:, i]
+
+    rul_results = {}
+    for sev_col in active_cols:
+        sev_all = df[f'pred_{sev_col}'].values
+        try:
+            rul_results[sev_col] = fit_rul_for_severity(days_all, sev_all, sev_col, up_to_day)
+        except Exception as e:
+            return jsonify({"error": f"RUL fit failed for {sev_col}: {e}"}), 500
+
+    # Worst-case fault drives the RUL
+    worst_col   = min(rul_results, key=lambda c: rul_results[c]['L_pred'])
+    final_rul   = rul_results[worst_col]['RUL_pred']
+    current_day = int(up_to_day)
+
+    try:
+        generate_rul_plot(rul_results, fault_name)
+    except Exception:
+        traceback.print_exc()
+
     return jsonify({
-        "fault":       fault_label,
-        "rul":         round(rul_pred, 2),
+        "fault":       fault_name,
+        "rul":         round(final_rul, 2),
         "current_day": current_day,
-        "matlab_day":  int(merged_df.shape[0]),
-        "total_days":  int(merged_df.shape[0]),
     })
- 
- 
-# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ROUTE — GET /validation_graph
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 @app.route("/validation_graph", methods=["GET"])
 def validation_graph():
-    """
-    Returns a PNG comparing actual vs predicted RUL up to currentDay.
-    The MATLAB-appended last day is highlighted.
-    """
-    if state["merged_df"] is None or state["model_reg"] is None:
-        return jsonify({"error": "No data. Run simulation and prediction first."}), 400
- 
-    current_day = int(request.args.get("currentDay", len(state["merged_df"])))
-    merged_df    = state["merged_df"]
-    reg          = state["model_reg"]
-    feature_cols = state["feature_cols"]
- 
-    # Slice up to currentDay
-    df_slice = merged_df.iloc[:current_day].copy()
-    actual_rul   = df_slice["rul"].values if "rul" in df_slice.columns else np.zeros(len(df_slice))
-    predicted_rul = reg.predict(df_slice[feature_cols].values)
- 
-    days = np.arange(1, len(df_slice) + 1)
-    total_days = len(merged_df)
-    matlab_day = total_days  # MATLAB day is always the last one
- 
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(days, actual_rul,    color="#22d3ee", linewidth=2, label="Actual RUL")
-    ax.plot(days, predicted_rul, color="#f59e0b", linewidth=2,
-            linestyle="--", label="Predicted RUL")
- 
-    if matlab_day <= current_day:
-        ax.axvline(x=matlab_day, color="#f43f5e", linestyle=":", linewidth=1.5,
-                   label=f"MATLAB Day ({matlab_day})")
-        ax.scatter([matlab_day], [predicted_rul[-1]], color="#f43f5e", zorder=5, s=60)
- 
-    ax.set_xlabel("Operating Day")
-    ax.set_ylabel("RUL (days)")
-    ax.set_title(f"Validation — Actual vs Predicted RUL (up to Day {current_day})")
-    ax.legend()
-    ax.set_facecolor("#0f172a")
-    fig.patch.set_facecolor("#0f172a")
-    ax.tick_params(colors="white")
-    ax.xaxis.label.set_color("white")
-    ax.yaxis.label.set_color("white")
-    ax.title.set_color("white")
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#334155")
- 
-    fig.tight_layout()
- 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return send_file(buf, mimetype="image/png")
- 
- 
-# ═══════════════════════════════════════════════════════════════════════════
+    graph_path = STATIC_DIR / "rul_graph.png"
+    if not graph_path.exists():
+        return jsonify({"error": "No graph yet. Run prediction first."}), 404
+    return send_file(str(graph_path), mimetype="image/png")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

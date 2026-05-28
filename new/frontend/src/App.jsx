@@ -4,8 +4,9 @@ import "./App.css";
 function App() {
   const [selectedFaults, setSelectedFaults] = useState([]);
   const [dataset, setDataset] = useState([]);
+  const [uploadedDataset, setUploadedDataset] = useState([]);
   const [uploadedFile, setUploadedFile] = useState(null);
-  const [currentDay, setCurrentDay] = useState(1);
+  const [currentDay, setCurrentDay] = useState(0);
   const [simulationStatus, setSimulationStatus] = useState("");
   const [predictionResult, setPredictionResult] = useState(null);
   const [graphUrl, setGraphUrl] = useState("");
@@ -23,10 +24,6 @@ function App() {
   };
 
   const runSimulation = async () => {
-    if (selectedFaults.length === 0) {
-      alert("Please select at least one fault");
-      return;
-    }
     if (isSimulating) return; // prevent double-click during MATLAB run
 
     setIsSimulating(true);
@@ -44,15 +41,6 @@ function App() {
       });
 
       if (!response.ok) throw new Error("Backend simulation failed");
-
-      const data = await response.json();
-
-      if (data.dataset) setDataset(data.dataset);
-
-      // Only set graph URL after MATLAB confirms it generated the file
-      if (data.graph_generated) {
-        setGraphUrl(`http://127.0.0.1:5000/static/rul_graph.png?t=${Date.now()}`);
-      }
 
       setSimulationStatus("success");
     } catch (error) {
@@ -82,6 +70,7 @@ function App() {
 
       const data = await response.json();
       setDataset(data.dataset);
+      setUploadedDataset(data.dataset || []);
       alert("Lifecycle dataset uploaded successfully");
     } catch (error) {
       console.error("Upload error:", error);
@@ -117,12 +106,6 @@ function App() {
     }
   };
 
-  const sensorReadings = [
-    { label: "Pressure", unit: "bar", value: predictionResult ? "8.42" : "—", icon: "◈", status: "nominal" },
-    { label: "Temperature", unit: "°C", value: predictionResult ? "74.3" : "—", icon: "◉", status: "warning" },
-    { label: "Vibration", unit: "mm/s", value: predictionResult ? "2.17" : "—", icon: "◇", status: "nominal" },
-    { label: "Flow Rate", unit: "L/min", value: predictionResult ? "31.8" : "—", icon: "◈", status: "nominal" },
-  ];
 
   const xaiInsights = [
     { factor: "Temperature Spike", contribution: 38, direction: "up" },
@@ -165,12 +148,6 @@ function App() {
             <span className="nav-icon">▸</span> Validation Suite
           </button>
           <button
-            className={`nav-item ${activeSection === "sensors" ? "active" : ""}`}
-            onClick={() => setActiveSection("sensors")}
-          >
-            <span className="nav-icon">▸</span> Sensor Data
-          </button>
-          <button
             className={`nav-item ${activeSection === "dataset" ? "active" : ""}`}
             onClick={() => setActiveSection("dataset")}
           >
@@ -184,11 +161,6 @@ function App() {
           </button>
         </nav>
 
-        <div className="sidebar-footer">
-          <span className="footer-icon">⊕</span> Support
-          <br />
-          <span className="footer-icon">⟨⟩</span> API Documentation
-        </div>
       </aside>
 
       {/* MAIN CONTENT */}
@@ -252,7 +224,7 @@ function App() {
                 <div className="selected-display">
                   Active faults:{" "}
                   <span className="selected-value">
-                    {selectedFaults.length > 0 ? selectedFaults.join(", ") : "None selected"}
+                    {selectedFaults.length > 0 ? selectedFaults.join(", ") : "None (Healthy)"}
                   </span>
                 </div>
               </div>
@@ -273,7 +245,7 @@ function App() {
                   {simulationStatus && (
                     <div className={`status-pill ${simulationStatus}`}>
                       {simulationStatus === "running" && "⟳ Running MATLAB Simulation..."}
-                      {simulationStatus === "success" && "✓ Simulation Completed Successfully"}
+                      {simulationStatus === "success" && "✓ Simulation Started Successfully"}
                       {simulationStatus === "error" && "✕ Simulation Failed — check Flask logs"}
                     </div>
                   )}
@@ -303,18 +275,18 @@ function App() {
                   <div className="card-label">STEP 4 — OPERATING DAY</div>
                   <div className="slider-display">
                     <span>Day {currentDay}</span>
-                    <span className="slider-max">/ 20</span>
+                    <span className="slider-max">/ 45</span>
                   </div>
                   <input
                     type="range"
-                    min="1"
-                    max="20"
+                    min="0"
+                    max="45"
                     value={currentDay}
                     onChange={(e) => setCurrentDay(e.target.value)}
                     className="dash-slider"
                   />
                   <div className="slider-ticks">
-                    <span>1</span><span>5</span><span>10</span><span>15</span><span>20</span>
+                    <span>0</span><span>10</span><span>20</span><span>30</span><span>45</span>
                   </div>
                 </div>
 
@@ -329,43 +301,6 @@ function App() {
                 </div>
               </div>
             </section>
-
-            {/* RUL GRAPH — shown only after prediction */}
-            {predictionResult && graphUrl && (
-              <section className="content-section">
-                <div className="card">
-                  <div className="card-label">
-                    REMAINING USEFUL LIFE — UP TO DAY {currentDay}
-                  </div>
-                  <p className="graph-sub">
-                    Actual vs. Predicted RUL trajectory through Day {currentDay} of operation.
-                    Full forecast is available in the Validation Suite.
-                  </p>
-                  <div className="graph-legend">
-                    <span className="legend-item">
-                      <span className="legend-line solid" /> Actual RUL (Ground Truth)
-                    </span>
-                    <span className="legend-item">
-                      <span className="legend-line dashed" /> Predicted RUL
-                    </span>
-                  </div>
-                  <div className="graph-wrap">
-                    <img
-                      src={graphUrl}
-                      alt="RUL Prediction Graph"
-                      className="graph-img"
-                      onError={(e) => {
-                        e.target.style.display = "none";
-                        e.target.nextSibling.style.display = "block";
-                      }}
-                    />
-                    <p style={{ display: "none", color: "var(--color-warning, #f59e0b)", marginTop: 8 }}>
-                      ⚠ Graph image could not be loaded. Ensure Flask is serving /static/rul_graph.png
-                    </p>
-                  </div>
-                </div>
-              </section>
-            )}
 
             {/* PREDICTION RESULTS */}
             {predictionResult && (
@@ -388,68 +323,31 @@ function App() {
               </section>
             )}
 
-            {/* MODEL PERFORMANCE METRICS */}
-            {predictionResult && (
+            {/* RUL GRAPH — shown only after prediction */}
+            {predictionResult && graphUrl && (
               <section className="content-section">
-                <div className="card-label" style={{ marginBottom: "18px", letterSpacing: "0.12em" }}>
-                  MODEL PERFORMANCE METRICS
-                </div>
-                <div className="cards-row" style={{ alignItems: "flex-start" }}>
-
-                  {/* ── FAULT CLASSIFIER ── */}
-                  <div style={{ flex: 1 }}>
-                    <h2 className="metrics-heading">Fault Classifier</h2>
-                    <div className="metrics-accuracy-card">
-                      <div className="metrics-accuracy-label">OVERALL ACCURACY</div>
-                      <div className="metrics-accuracy-value">91.63%</div>
-                      <div className="metrics-accuracy-model">RandomForestClassifier</div>
-                    </div>
-                    <table className="data-table metrics-table" style={{ marginTop: "10px" }}>
-                      <thead>
-                        <tr>
-                          <th>Class</th>
-                          <th>Precision</th>
-                          <th>Recall</th>
-                          <th>F1-Score</th>
-                          <th>Support</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr><td>Healthy</td><td>0.780</td><td>0.991</td><td>0.873</td><td>111</td></tr>
-                        <tr><td>LeakFault</td><td>0.989</td><td>0.867</td><td>0.924</td><td>105</td></tr>
-                        <tr><td>BlockingFault</td><td>0.972</td><td>0.946</td><td>0.959</td><td>111</td></tr>
-                        <tr><td>BearingFault</td><td>0.989</td><td>0.854</td><td>0.917</td><td>103</td></tr>
-                      </tbody>
-                    </table>
+                <div className="card">
+                  <div className="card-label">
+                    REMAINING USEFUL LIFE — UP TO DAY {currentDay}
                   </div>
-
-                  {/* ── FAULT FACTOR REGRESSOR ── */}
-                  <div style={{ flex: 1 }}>
-                    <h2 className="metrics-heading">Fault Factor Regressor</h2>
-                    <div className="metrics-accuracy-card">
-                      <div className="metrics-accuracy-label">OVERALL ACCURACY</div>
-                      <div className="metrics-accuracy-value">99.84%</div>
-                      <div className="metrics-accuracy-model">RandomForestRegressor</div>
-                    </div>
-                    <table className="data-table metrics-table" style={{ marginTop: "10px" }}>
-                      <thead>
-                        <tr>
-                          <th>Severity Column</th>
-                          <th>MAE</th>
-                          <th>R²</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr><td>LeakFault</td><td>1.4134e-08</td><td>0.9984</td></tr>
-                        <tr><td>BlockingFault</td><td>7.3234e-04</td><td>0.9992</td></tr>
-                        <tr><td>BearingFault</td><td>2.3627e-06</td><td>0.9975</td></tr>
-                      </tbody>
-                    </table>
+<div className="graph-wrap">
+                    <img
+                      src={graphUrl}
+                      alt="RUL Prediction Graph"
+                      className="graph-img"
+                      onError={(e) => {
+                        e.target.style.display = "none";
+                        e.target.nextSibling.style.display = "block";
+                      }}
+                    />
+                    <p style={{ display: "none", color: "var(--color-warning, #f59e0b)", marginTop: 8 }}>
+                      ⚠ Graph image could not be loaded. Ensure Flask is serving /static/rul_graph.png
+                    </p>
                   </div>
-
                 </div>
               </section>
             )}
+
           </>
         )}
 
@@ -460,28 +358,10 @@ function App() {
               <div>
                 <h1 className="section-title">Model Validation Suite</h1>
                 <p className="section-desc">
-                  Model accuracy metrics and validation plot against ground truth telemetry data.
+                  Model validation plot against ground truth data.
                 </p>
               </div>
             </div>
-
-            <div className="card" style={{ marginBottom: "16px" }}>
-              <div className="card-label">MODEL ACCURACY METRICS</div>
-              <div className="model-metrics">
-                <div className="metric-row">
-                  <span className="metric-label">Accuracy</span>
-                  <span className="metric-value accent-green">
-                    {predictionResult ? "94.2%" : "—"}
-                  </span>
-                </div>
-              </div>
-              {!predictionResult && (
-                <p className="xai-desc" style={{ marginTop: "10px" }}>
-                  Run a prediction on the Simulation page to populate accuracy metrics.
-                </p>
-              )}
-            </div>
-
             <div className="card">
               <div className="card-label">ACCURACY & VALIDATION PLOT</div>
               {validationGraph ? (
@@ -562,79 +442,54 @@ function App() {
         )}
 
         {/* ─── SENSOR SECTION ─── */}
-        {activeSection === "sensors" && (
-          <section className="content-section">
-            <div className="section-header">
-              <div>
-                <h1 className="section-title">Live Sensor Telemetry</h1>
-                <p className="section-desc">
-                  Real-time readings from all instrumented measurement points on ALPHA_PLANT_7.
-                </p>
-              </div>
-            </div>
-            <div className="sensors-row">
-              {sensorReadings.map((s) => (
-                <div key={s.label} className={`sensor-card sensor-${s.status}`}>
-                  <div className="sensor-icon">{s.icon}</div>
-                  <div className="sensor-label">{s.label}</div>
-                  <div className="sensor-value">{s.value}</div>
-                  <div className="sensor-unit">{s.unit}</div>
-                  <div className={`sensor-status-badge ${s.status}`}>{s.status.toUpperCase()}</div>
-                </div>
-              ))}
-            </div>
-            <div className="card" style={{ marginTop: "16px" }}>
-              <div className="card-label">SENSOR NOTES</div>
-              <p className="xai-desc">
-                Temperature reading on Sensor 2 shows a gradual upward trend over the last 4 cycles.
-                Recommend scheduled inspection of heat exchanger unit. All other sensors operating
-                within nominal bounds.
-              </p>
-            </div>
-          </section>
-        )}
 
         {/* ─── DATASET SECTION ─── */}
         {activeSection === "dataset" && (
           <section className="content-section">
             <div className="section-header">
               <div>
-                <h1 className="section-title">Generated Dataset</h1>
+                <h1 className="section-title">Uploaded CSV Dataset</h1>
                 <p className="section-desc">
-                  Telemetry records produced by the MATLAB simulation engine.
+                  {uploadedFile
+                    ? `${uploadedDataset.length} records from: ${uploadedFile.name}`
+                    : "Upload a CSV file from the Simulation section to view its records here."}
                 </p>
               </div>
             </div>
-            {dataset.length > 0 ? (
+            {uploadedDataset.length > 0 ? (
               <div className="card">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Pressure</th>
-                      <th>Temperature</th>
-                      <th>Fault</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dataset.map((item, index) => (
-                      <tr key={index}>
-                        <td>{item.time}</td>
-                        <td>{item.pressure}</td>
-                        <td>{item.temperature}</td>
-                        <td>
-                          <span className="fault-tag">{item.fault}</span>
-                        </td>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        {Object.keys(uploadedDataset[0]).map((col) => (
+                          <th key={col}>{col}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {uploadedDataset.map((item, index) => (
+                        <tr key={index}>
+                          {Object.keys(uploadedDataset[0]).map((col) => (
+                            <td key={col}>
+                              {col.toLowerCase() === "fault" ? (
+                                <span className="fault-tag">{item[col]}</span>
+                              ) : (
+                                item[col]
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : (
               <div className="card empty-state">
                 <div className="empty-icon">◈</div>
                 <div className="empty-text">
-                  No dataset loaded. Run a simulation or upload a CSV file.
+                  No dataset loaded. Upload a CSV file from the Simulation section.
                 </div>
               </div>
             )}
