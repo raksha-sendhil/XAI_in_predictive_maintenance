@@ -6,14 +6,17 @@ function App() {
   const [dataset, setDataset] = useState([]);
   const [uploadedDataset, setUploadedDataset] = useState([]);
   const [uploadedFile, setUploadedFile] = useState(null);
-  const [currentDay, setCurrentDay] = useState(0);
+  const [currentDay, setCurrentDay] = useState(22);
   const [simulationStatus, setSimulationStatus] = useState("");
   const [predictionResult, setPredictionResult] = useState(null);
   const [graphUrl, setGraphUrl] = useState("");
   const [activeSection, setActiveSection] = useState("simulation");
   const [liveSyncActive, setLiveSyncActive] = useState(true);
   const [validationGraph, setValidationGraph] = useState("");
-  const [isSimulating, setIsSimulating] = useState(false); // guard against double-clicks
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [shapData, setShapData] = useState(null);
+  const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
+  const [validationMetrics, setValidationMetrics] = useState(null);
 
   const faults = ["BearingFault", "BlockingFault", "LeakFault"];
 
@@ -92,6 +95,17 @@ function App() {
       const ts = Date.now();
 
       setPredictionResult(data);
+      if (data.real_rul !== undefined) {
+        setValidationMetrics({
+          predictedRul: data.rul,
+          realRul: data.real_rul,
+          rulError: data.rul_error,
+          realLifecycle: data.real_lifecycle,
+        });
+      } else {
+        setValidationMetrics(null);
+      }
+      fetchExplanation();
 
       // Validation graph: backend renders actual-vs-predicted up to currentDay
       setValidationGraph(
@@ -107,12 +121,26 @@ function App() {
   };
 
 
-  const xaiInsights = [
-    { factor: "Temperature Spike", contribution: 38, direction: "up" },
-    { factor: "Vibration Amplitude", contribution: 27, direction: "up" },
-    { factor: "Pressure Variance", contribution: 19, direction: "up" },
-    { factor: "Flow Rate Stability", contribution: 16, direction: "down" },
-  ];
+  const fetchExplanation = async () => {
+    setIsLoadingExplanation(true);
+    try {
+      const response = await fetch("http://127.0.0.1:5000/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        console.error("Explain error:", err);
+        return;
+      }
+      const data = await response.json();
+      setShapData(data);
+    } catch (error) {
+      console.error("Explanation fetch failed:", error);
+    } finally {
+      setIsLoadingExplanation(false);
+    }
+  };
 
   return (
     <div className="dashboard-root">
@@ -358,12 +386,42 @@ function App() {
               <div>
                 <h1 className="section-title">Model Validation Suite</h1>
                 <p className="section-desc">
-                  Model validation plot against ground truth data.
+                  Predicted severity curves overlaid on ground-truth values from the uploaded CSV,
+                  with RUL error against the real lifecycle length.
                 </p>
               </div>
             </div>
+
+            {/* RUL comparison metrics */}
+            {validationMetrics && (
+              <div className="results-grid" style={{ marginBottom: "16px" }}>
+                <div className="result-tile">
+                  <div className="result-tile-label">PREDICTED RUL</div>
+                  <div className="result-tile-value rul-value">{validationMetrics.predictedRul}</div>
+                  <div className="result-tile-unit">days</div>
+                </div>
+                <div className="result-tile">
+                  <div className="result-tile-label">REAL RUL</div>
+                  <div className="result-tile-value" style={{ color: "var(--accent-green)" }}>
+                    {validationMetrics.realRul}
+                  </div>
+                  <div className="result-tile-unit">days</div>
+                </div>
+                <div className="result-tile result-tile-accent">
+                  <div className="result-tile-label">RUL ERROR</div>
+                  <div
+                    className="result-tile-value"
+                    style={{ color: Math.abs(validationMetrics.rulError) <= 5 ? "var(--accent-green)" : "var(--accent-red)" }}
+                  >
+                    {validationMetrics.rulError > 0 ? "+" : ""}{validationMetrics.rulError}
+                  </div>
+                  <div className="result-tile-unit">days ({validationMetrics.rulError > 0 ? "over-estimated" : "under-estimated"})</div>
+                </div>
+              </div>
+            )}
+
             <div className="card">
-              <div className="card-label">ACCURACY & VALIDATION PLOT</div>
+              <div className="card-label">PREDICTED vs REAL SEVERITY — VALIDATION PLOT</div>
               {validationGraph ? (
                 <div className="graph-wrap">
                   <img
@@ -376,7 +434,7 @@ function App() {
                     }}
                   />
                   <p style={{ display: "none", color: "var(--color-warning, #f59e0b)", marginTop: 8 }}>
-                    ⚠ Validation graph could not be loaded. Ensure Flask is serving /validation_graph
+                    ⚠ Validation graph could not be loaded.
                   </p>
                 </div>
               ) : (
@@ -398,42 +456,90 @@ function App() {
               <div>
                 <h1 className="section-title">Explainable AI — SHAP Analysis</h1>
                 <p className="section-desc">
-                  Feature attribution output from SHAP. Shows which sensor inputs most influenced
-                  the RUL prediction for the current operating cycle.
+                  Feature attribution from the severity regressor. Shows which sensor readings
+                  most influenced the severity prediction across the uploaded lifecycle.
                 </p>
               </div>
             </div>
 
             <div className="card">
               <div className="card-label">SHAP FEATURE IMPORTANCE</div>
-              {predictionResult ? (
-                <>
-                  <div className="xai-factors" style={{ marginTop: "16px" }}>
-                    {xaiInsights.map((x) => (
-                      <div key={x.factor} className="xai-row">
-                        <span className="xai-factor">{x.factor}</span>
-                        <div className="xai-bar-wrap">
-                          <div
-                            className={`xai-bar-fill ${x.direction === "up" ? "xai-up" : "xai-down"}`}
-                            style={{ width: `${x.contribution * 2}%` }}
-                          />
-                        </div>
-                        <span className={`xai-pct ${x.direction === "up" ? "xai-up" : "xai-down"}`}>
-                          {x.direction === "up" ? "▲" : "▼"} {x.contribution}%
-                        </span>
-                      </div>
-                    ))}
+
+              {!predictionResult ? (
+                <div className="empty-state" style={{ padding: "40px 0" }}>
+                  <div className="empty-icon">◈</div>
+                  <div className="empty-text">
+                    No SHAP output available. Run a prediction first to generate explanations.
                   </div>
-                  <p className="xai-note" style={{ marginTop: "16px" }}>
-                    ⓘ Temperature Spike is the primary degradation driver in the current cycle.
-                    Monitor thermal envelope and cooling system integrity.
+                </div>
+              ) : isLoadingExplanation ? (
+                <div className="empty-state" style={{ padding: "40px 0" }}>
+                  <div className="empty-icon" style={{ animation: "spin 1s linear infinite" }}>⟳</div>
+                  <div className="empty-text">Computing SHAP explanations...</div>
+                </div>
+              ) : shapData ? (
+                <>
+                  <div style={{ marginBottom: "16px", marginTop: "14px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                    <span className="xai-badge">FAULT: {shapData.fault}</span>
+                    <span className="xai-badge">{shapData.explanations.length} ACTIVE FAULT{shapData.explanations.length > 1 ? "S" : ""}</span>
+                  </div>
+
+                  <p className="xai-note" style={{ marginBottom: "24px" }}>
+                    ⓘ {shapData.summary}
                   </p>
+
+                  {shapData.explanations.map((exp, idx) => (
+                    <div
+                      key={exp.severity}
+                      style={{
+                        marginBottom: "32px",
+                        paddingTop: idx > 0 ? "24px" : "0",
+                        borderTop: idx > 0 ? "1px solid var(--border-subtle)" : "none",
+                      }}
+                    >
+                      <div className="card-label" style={{ marginBottom: "10px" }}>
+                        {exp.severity.toUpperCase()} SEVERITY
+                      </div>
+
+                      <p className="xai-note" style={{ marginBottom: "16px" }}>
+                        {exp.summary}
+                      </p>
+
+                      <div className="xai-factors">
+                        {exp.features.map((f) => (
+                          <div key={f.feature} className="xai-row">
+                            <span className="xai-factor" title={f.feature}>{f.label}</span>
+                            <div className="xai-bar-wrap">
+                              <div
+                                className={`xai-bar-fill ${f.direction === "up" ? "xai-up" : "xai-down"}`}
+                                style={{ width: `${Math.min(f.pct * 2, 100)}%` }}
+                              />
+                            </div>
+                            <span className={`xai-pct ${f.direction === "up" ? "xai-up" : "xai-down"}`}>
+                              {f.direction === "up" ? "▲" : "▼"} {f.pct}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                        {exp.features.map((f) => (
+                          <p key={f.feature + "_text"} className="xai-note">
+                            <span className={f.direction === "up" ? "xai-up" : "xai-down"}>
+                              {f.direction === "up" ? "▲" : "▼"}
+                            </span>{" "}
+                            {f.text}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </>
               ) : (
                 <div className="empty-state" style={{ padding: "40px 0" }}>
                   <div className="empty-icon">◈</div>
                   <div className="empty-text">
-                    No SHAP output available. Run a prediction first to generate explanations.
+                    Explanation unavailable. Check Flask backend logs.
                   </div>
                 </div>
               )}

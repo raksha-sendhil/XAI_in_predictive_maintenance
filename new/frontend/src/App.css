@@ -5,6 +5,11 @@
   padding: 0;
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Syne:wght@400;600;700;800&display=swap');
 
 :root {
@@ -775,7 +780,7 @@ html, body, #root {
 
 .xai-row {
   display: grid;
-  grid-template-columns: 160px 1fr 60px;
+  grid-template-columns: 200px 1fr 60px;
   align-items: center;
   gap: 12px;
 }
