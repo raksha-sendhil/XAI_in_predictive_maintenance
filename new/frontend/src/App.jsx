@@ -248,7 +248,7 @@ function App() {
               <div className="section-header">
                 <div>
                   <h1 className="section-title" align="center">Predictive Maintenance Dashboard</h1>
-                  <p className="section-desc" align="center">
+                  <p className="section-desc" text-align="center">
                     Configure fault types, run the MATLAB simulation, and generate RUL predictions
                     for ALPHA_PLANT_7.
                   </p>

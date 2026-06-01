@@ -273,7 +273,7 @@ html, body, #root {
   font-size: 14px; 
   color: var(--text-secondary);
   line-height: 1.6;
-  max-width: 680px;
+  text-align: center;
 }
 
 /* ===== BOUTIQUE CARDS ===== */
