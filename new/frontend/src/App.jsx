@@ -64,7 +64,7 @@ function App() {
     formData.append("file", uploadedFile);
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/upload", {
+      const response = await fetch("http://127.0.0.1:5173/upload", {
         method: "POST",
         body: formData,
       });
@@ -247,8 +247,8 @@ function App() {
             <section className="content-section">
               <div className="section-header">
                 <div>
-                  <h1 className="section-title">Predictive Maintenance Dashboard</h1>
-                  <p className="section-desc">
+                  <h1 className="section-title" align="center">Predictive Maintenance Dashboard</h1>
+                  <p className="section-desc" align="center">
                     Configure fault types, run the MATLAB simulation, and generate RUL predictions
                     for ALPHA_PLANT_7.
                   </p>
@@ -299,6 +299,8 @@ function App() {
                     </div>
                   )}
                 </div>
+
+    
 
                 <div className="card">
                   <div className="card-label">STEP 3 — UPLOAD CSV FILE</div>
@@ -405,8 +407,8 @@ function App() {
           <section className="content-section">
             <div className="section-header">
               <div>
-                <h1 className="section-title">Model Validation Suite</h1>
-                <p className="section-desc">
+                <h1 className="section-title" align="center">Model Validation Suite</h1>
+                <p className="section-desc" align="center">
                   Predicted severity curves overlaid on ground-truth values from the uploaded CSV,
                   with RUL error against the real lifecycle length.
                 </p>
@@ -475,8 +477,8 @@ function App() {
           <section className="content-section">
             <div className="section-header">
               <div>
-                <h1 className="section-title">Explainable AI — SHAP Analysis</h1>
-                <p className="section-desc">
+                <h1 className="section-title" align="center">Explainable AI — SHAP Analysis</h1>
+                <p className="section-desc" align="center">
                   Feature attribution from the severity regressor. Shows which sensor readings
                   most influenced the severity prediction across the uploaded lifecycle.
                 </p>
@@ -575,8 +577,8 @@ function App() {
           <section className="content-section">
             <div className="section-header">
               <div>
-                <h1 className="section-title">Uploaded CSV Dataset</h1>
-                <p className="section-desc">
+                <h1 className="section-title" align="center">Uploaded CSV Dataset</h1>
+                <p className="section-desc" align="center">
                   {uploadedFile
                     ? `${uploadedDataset.length} records from: ${uploadedFile.name}`
                     : "Upload a CSV file from the Simulation section to view its records here."}
