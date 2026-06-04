@@ -64,7 +64,7 @@ function App() {
     formData.append("file", uploadedFile);
 
     try {
-      const response = await fetch("http://127.0.0.1:5173/upload", {
+      const response = await fetch("http://127.0.0.1:5000/upload", {
         method: "POST",
         body: formData,
       });
@@ -95,6 +95,15 @@ function App() {
       const ts = Date.now();
 
       setPredictionResult(data);
+
+      if (data.fault === "Healthy") {
+        setGraphUrl("");
+        setValidationGraph("");
+        setShapData(null);
+        setValidationMetrics(null);
+        return;
+      }
+
       if (data.real_rul !== undefined) {
         setValidationMetrics({
           predictedRul: data.rul,
@@ -493,6 +502,13 @@ function App() {
                   <div className="empty-icon">◈</div>
                   <div className="empty-text">
                     No SHAP output available. Run a prediction first to generate explanations.
+                  </div>
+                </div>
+              ) : predictionResult.fault === "Healthy" ? (
+                <div className="empty-state" style={{ padding: "40px 0" }}>
+                  <div className="empty-icon" style={{ color: "var(--accent-green)" }}>✓</div>
+                  <div className="empty-text">
+                    Machine is healthy. No fault detected — SHAP analysis is not applicable.
                   </div>
                 </div>
               ) : isLoadingExplanation ? (
