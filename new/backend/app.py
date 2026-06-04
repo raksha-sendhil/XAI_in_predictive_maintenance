@@ -295,17 +295,17 @@ def generate_validation_plot(rul_results: dict, fault_name: str,
 
     for ax, (sev_col, r) in zip(axes[:, 0], rul_results.items()):
         color = SEVERITY_CONFIG[sev_col]['color']
-        ax.set_facecolor('#0f1117')
+        ax.set_facecolor("#c7d1ed")
         for spine in ax.spines.values():
             spine.set_color('#2e3250')
-        ax.tick_params(colors='#8b92b8')
-        ax.xaxis.label.set_color('#8b92b8')
-        ax.yaxis.label.set_color('#8b92b8')
+        ax.tick_params(colors="#242630")
+        ax.xaxis.label.set_color("#363947")
+        ax.yaxis.label.set_color("#323543")
         ax.grid(True, linestyle='--', alpha=0.25, color='#2e3250')
 
         # ── Real severity (all CSV rows, crosses) ──────────────────────────
         if sev_col in df.columns:
-            ax.scatter(days_all, df[sev_col].values, s=35, color='#66bb6a',
+            ax.scatter(days_all, df[sev_col].values, s=35, color="#458048",
                        marker='x', linewidths=1.5, zorder=7, alpha=0.85,
                        label='Real severity (ground truth)')
 
@@ -325,20 +325,20 @@ def generate_validation_plot(rul_results: dict, fault_name: str,
                 label=f"Extrapolated → Pred. RUL = {r['RUL_pred']:.1f} d")
 
         # ── Current day ───────────────────────────────────────────────────
-        ax.axvline(r['current_day'], color='#ce93d8', linestyle=':', linewidth=1.8,
+        ax.axvline(r['current_day'], color="#bc56ce", linestyle=':', linewidth=1.8,
                    label=f"Current day ({int(r['current_day'])})")
 
         # ── Failure threshold ─────────────────────────────────────────────
-        ax.axhline(r['S_threshold'], color='#ef5350', linestyle='-', linewidth=1.4,
+        ax.axhline(r['S_threshold'], color="#c52926", linestyle='-', linewidth=1.4,
                    label=f"Failure threshold ({r['S_threshold']:.3g})")
 
         # ── Predicted EOL ─────────────────────────────────────────────────
-        ax.axvline(r['L_pred'], color='#ff8a65', linestyle='--', linewidth=1.4,
+        ax.axvline(r['L_pred'], color="#d35028", linestyle='--', linewidth=1.4,
                    label=f"Predicted EOL (day {r['L_pred']:.1f})")
 
         # ── Real EOL ──────────────────────────────────────────────────────
         if real_lifecycle is not None:
-            ax.axvline(real_lifecycle, color='#66bb6a', linestyle='--', linewidth=1.8,
+            ax.axvline(real_lifecycle, color="#3b823e", linestyle='--', linewidth=1.8,
                        label=f"Real EOL (day {int(real_lifecycle)})")
 
         ax.set_title(
@@ -350,8 +350,8 @@ def generate_validation_plot(rul_results: dict, fault_name: str,
         ylim_lo = r['S_min'] * 0.95 if r['decreasing'] else 0
         ylim_hi = r['S_max'] * 1.05 if r['decreasing'] else r['S_max'] * 1.1
         ax.set_ylim(ylim_lo, ylim_hi)
-        ax.legend(loc='best', fontsize=8, facecolor='#1c1f2e',
-                  edgecolor='#2e3250', labelcolor='#c5cae9')
+        ax.legend(loc='best', fontsize=8, facecolor="#b5bde8",
+                  edgecolor='#2e3250', labelcolor="#3a3b46")
 
     if real_lifecycle is not None:
         title = (
@@ -366,7 +366,7 @@ def generate_validation_plot(rul_results: dict, fault_name: str,
     fig.suptitle(title, color='#e8eaf0', fontsize=12)
     plt.tight_layout()
     fig.savefig(str(STATIC_DIR / "validation_graph.png"), dpi=120,
-                bbox_inches='tight', facecolor='#0f1117')
+                bbox_inches='tight', facecolor="#bdc7e6")
     plt.close(fig)
 
     return real_lifecycle, real_rul, rul_error

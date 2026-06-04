@@ -64,7 +64,7 @@ function App() {
     formData.append("file", uploadedFile);
 
     try {
-      const response = await fetch("http://127.0.0.1:5173/upload", {
+      const response = await fetch("http://127.0.0.1:5000/upload", {
         method: "POST",
         body: formData,
       });
@@ -207,6 +207,12 @@ function App() {
             onClick={() => setActiveSection("explanation")}
           >
             <span className="nav-icon">▸</span> Explanation
+          </button>
+          <button
+            className={`nav-item ${activeSection === "suggestions" ? "active" : ""}`}
+            onClick={() => setActiveSection("suggestions")}
+          >
+            <span className="nav-icon">▸</span> Suggestions
           </button>
         </nav>
 
@@ -569,6 +575,8 @@ function App() {
             </div>
           </section>
         )}
+
+        {/*----Suggestion Section----*/}
 
         {/* ─── SENSOR SECTION ─── */}
 
