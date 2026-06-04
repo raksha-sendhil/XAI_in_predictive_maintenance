@@ -217,6 +217,12 @@ function App() {
           >
             <span className="nav-icon">▸</span> Explanation
           </button>
+          <button
+            className={`nav-item ${activeSection === "suggestions" ? "active" : ""}`}
+            onClick={() => setActiveSection("suggestions")}
+          >
+            <span className="nav-icon">▸</span> Suggestions
+          </button>
         </nav>
 
       </aside>
@@ -585,6 +591,8 @@ function App() {
             </div>
           </section>
         )}
+
+        {/*----Suggestion Section----*/}
 
         {/* ─── SENSOR SECTION ─── */}
 
