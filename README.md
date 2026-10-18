@@ -38,7 +38,7 @@ Evaluated on a held-out 20% split of the **4,265-sample** simulated dataset (8 b
 
 **Severity regressor: overall R² = 0.968** (Leak 0.980 · Blocking 0.988 · Bearing 0.938)
 
-Full metrics are in [`phase_3/model_metrics.json`](phase_3/model_metrics.json).
+Full metrics are in [`backend/models/model_metrics.json`](backend/models/model_metrics.json).
 
 ## Architecture
 
@@ -51,7 +51,7 @@ Full metrics are in [`phase_3/model_metrics.json`](phase_3/model_metrics.json).
                                                                       │
  ┌──────────────────────┐     ┌──────────────────────┐                ▼
  │  React dashboard     │ ◀─▶ │  Flask API           │ ◀── RUL curve fit, SHAP,
- │  (Vite)              │     │  new/backend/app.py  │     plots, PDF report
+ │  (Vite)              │     │  backend/app.py      │     plots, PDF report
  └──────────────────────┘     └──────────────────────┘
 ```
 
@@ -59,25 +59,24 @@ Full metrics are in [`phase_3/model_metrics.json`](phase_3/model_metrics.json).
 
 ## Repository layout
 
-```
+```text
 .
-├── new/                         # Current application
-│   ├── backend/
-│   │   ├── app.py               # Flask API: upload, simulate, predict, explain, export
-│   │   ├── requirements.txt
-│   │   └── matlab/              # Simulink pump model + per-fault-class simulation scripts (run_0.m … run_7.m)
-│   ├── frontend/                # React + Vite dashboard
-│   └── lifecycle_class*.csv     # Sample machine lifecycles, one per fault class, for uploading
-├── phase_3/                     # Final models
-│   ├── train_models.py          # Trains classifier, regressor and scaler
-│   ├── dataset_final.csv        # 4,265-sample training dataset
-│   ├── *.pkl                    # Trained models loaded by the backend
-│   └── model_metrics.json
-├── build_siminputs_multi_fault.m   # Dataset generation step 1: build Simulink inputs for all 8 classes
-├── run_siminput_chunk.m            # Step 2: run one chunk of simulations (split across machines)
-├── extract_features.m              # Step 3: turn raw simulation logs into the feature dataset
-├── paper_content.md                # Methodology and results write-up
-└── old/                            # Earlier Streamlit prototype (4 fault classes)
+├── backend/
+│   ├── app.py                  # Flask API: upload, simulate, predict, explain, export
+│   ├── requirements.txt
+│   └── models/                 # Trained classifier, regressor, scaler + model_metrics.json
+├── frontend/                   # React + Vite dashboard
+├── simulation/                 # MATLAB / Simulink
+│   ├── pdmRecipPump.slx        # Triplex pump model (+ libraries, parameters, supporting files)
+│   ├── Machine_*_LASTDAY.mat   # Simulation inputs, one per fault class
+│   ├── run_0.m … run_7.m       # Simulate one fault class (called by the backend's /simulate)
+│   └── dataset_generation/     # Scripts that produced the training dataset
+├── training/
+│   ├── train_models.py         # Trains the models and writes them to backend/models/
+│   └── dataset_final.csv       # 4,265-sample training dataset
+├── data/samples/               # Sample machine lifecycles (one per fault class) to upload
+└── docs/
+    └── paper_content.md        # Methodology and results write-up
 ```
 
 ## Getting started
@@ -91,19 +90,19 @@ Full metrics are in [`phase_3/model_metrics.json`](phase_3/model_metrics.json).
 ### 1. Backend
 
 ```bash
-cd new/backend
+cd backend
 pip install -r requirements.txt
 python app.py
 ```
 
-The API runs at `http://127.0.0.1:5000`. Models are loaded from `phase_3/` at startup.
+The API runs at `http://127.0.0.1:5000`. Models are loaded from `backend/models/` at startup.
 
 > The MATLAB executable path is hard-coded in `run_matlab()` in `app.py` (`C:\Program Files\MATLAB\R2025b\bin\matlab.exe`). Change it to match your install if you want to use simulation.
 
 ### 2. Frontend
 
 ```bash
-cd new/frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -113,7 +112,7 @@ Open the URL that Vite prints (usually `http://localhost:5173`).
 ### 3. Try it
 
 1. *(Optional)* Pick one or more faults and click **Simulate** to run the Simulink model.
-2. Upload a lifecycle CSV, for example `new/lifecycle_class4_leak_block.csv`.
+2. Upload a lifecycle CSV, for example `data/samples/lifecycle_class4_leak_block.csv`.
 3. Choose the current operating day and run the prediction to get the fault class, RUL and degradation chart.
 4. Open **Validation** to compare predicted and actual RUL.
 5. Open **Explanation** for the SHAP feature contributions.
@@ -133,12 +132,20 @@ Open the URL that Vite prints (usually `http://localhost:5173`).
 
 ## Regenerating the dataset and models
 
-1. In MATLAB, run `build_siminputs_multi_fault.m`. It builds the `Simulink.SimulationInput` array for every class and lifecycle day, then splits it into chunks.
+Run the MATLAB steps from the `simulation/` folder so the model files are on the path:
+
+```matlab
+cd simulation
+addpath dataset_generation
+```
+
+1. Run `build_siminputs_multi_fault.m`. It builds the `Simulink.SimulationInput` array for every class and lifecycle day, then splits it into chunks.
 2. Run `run_siminput_chunk.m` on each chunk. Chunks can be shared across machines, and each one resumes safely if interrupted.
 3. Run `extract_features.m` to build the feature and label CSV.
-4. Train the models:
+4. Train the models. The script reads `dataset_final.csv` and writes the `.pkl` files and metrics to `backend/models/`:
+
    ```bash
-   cd phase_3
+   cd training
    python train_models.py
    ```
 
