@@ -453,11 +453,20 @@ def predict():
     active_cols  = FAULT_ACTIVE_SEVERITIES.get(final_class, [])
 
     if not active_cols:
-        return jsonify({
+        response = {
             "fault":       fault_name,
             "rul":         None,
             "current_day": int(up_to_day),
-        })
+        }
+        state["last_prediction"] = response
+        state["last_explanation"] = None
+
+        for graph_name in ("rul_graph.png", "validation_graph.png"):
+            graph_path = STATIC_DIR / graph_name
+            if graph_path.exists():
+                graph_path.unlink()
+
+        return jsonify(response)
 
     pred_sev = _regressor.predict(X_scaled)   # shape (n_rows, 3)
     for i, col in enumerate(SEVERITY_COLS):
@@ -744,7 +753,7 @@ def export_report():
 
     # ── RUL prediction graph ────────────────────────────────────────────────────
     rul_path = STATIC_DIR / "rul_graph.png"
-    if rul_path.exists():
+    if fault != "Healthy" and rul_path.exists():
         story.append(Spacer(1, 0.5*cm))
         story.append(Paragraph("RUL Prediction Chart", S["h2"]))
         story.append(Paragraph(
@@ -775,6 +784,106 @@ def export_report():
 
             for f in block.get("features", []):
                 story.append(Paragraph(f"  - {_safe(f['text'])}", S["body"]))
+            story.append(Spacer(1, 0.4*cm))
+
+    # ── Maintenance Suggestions ───────────────────────────────────────────────
+    SUGGESTIONS = {
+        "Healthy": {
+            "title": "Healthy Condition",
+            "description": (
+                "The system is operating normally with no detected faults."
+            ),
+            "steps": [
+                "Continue regular monitoring and maintenance as per schedule.",
+                "Ensure that all sensors and data collection systems remain functional for ongoing health assessment.",
+                "Review historical data periodically to identify any emerging trends or early signs of degradation."
+            ],
+        },
+        "LeakFault": {
+            "title": "Leak Fault",
+            "description": (
+                "A leak fault indicates loss of fluid from the system, which can reduce pressure "
+                "and overall efficiency. Maintenance personnel should inspect seals, gaskets, valves, "
+                "and pipe connections for damage or wear. Any leaking components should be repaired or "
+                "replaced immediately to prevent further fluid loss and avoid damage to surrounding equipment."
+            ),
+            "steps": [
+                "If fluid is dripping from the plunger area, use a wrench to slightly tighten the packing gland nut.",
+                "Replace worn out/old seals.",
+                "Try replacing valve seats if the fluid is leaking internally.",
+            ],
+        },
+        "BlockingFault": {
+            "title": "Blockage Fault",
+            "description": (
+                "A blockage fault occurs when the flow path is restricted due to debris, sediment buildup, "
+                "or clogged filters. The system should be inspected for obstructions, and filters, strainers, "
+                "and pipelines should be cleaned thoroughly. Restoring proper flow helps maintain pump "
+                "performance and prevents excessive pressure buildup that could damage the equipment."
+            ),
+            "steps": [
+                "Shut down the pump and manually pull out or clean the debris basket on the suction line.",
+                "Disassemble the valve covers and manually remove any stones or debris wedged inside the suction or the discharge valves.",
+                "Check the plumbing lines to ensure that an inlet valve isn't partially closed.",
+            ],
+        },
+        "BearingFault": {
+            "title": "Bearing Fault",
+            "description": (
+                "A bearing fault is usually caused by wear, insufficient lubrication, misalignment, or excessive "
+                "vibration. The bearing assembly should be inspected, lubrication levels should be checked, and "
+                "alignment should be verified. If significant wear is observed, the bearing should be replaced to "
+                "prevent unexpected machine failure and costly downtime."
+            ),
+            "steps": [
+                "If the oil is low, top it up. If it looks milky or pitch black, drain it and refill it with clean oil.",
+                "Check and torque down the connecting rod bolts and main bearing housing caps.",
+                "Adjust the physical alignment between the driving motor and the pump crankshaft to eliminate any angular offset.",
+            ],
+        },
+    }
+    # ── Maintenance Suggestions ───────────────────────────────────────────────
+    FAULT_ACTIVE_SEVERITIES_REPORT = {
+        "Healthy":       [],
+        "LeakFault":     ["LeakFault"],
+        "BlockingFault": ["BlockingFault"],
+        "BearingFault":  ["BearingFault"],
+        "Leak+Block":    ["LeakFault", "BlockingFault"],
+        "Block+Bearing": ["BlockingFault", "BearingFault"],
+        "Bearing+Leak":  ["BearingFault", "LeakFault"],
+        "AllFaults":     ["LeakFault", "BlockingFault", "BearingFault"],
+    }
+
+    active_faults = FAULT_ACTIVE_SEVERITIES_REPORT.get(fault, None)
+
+    if active_faults is None:
+        # Unrecognised fault name — skip suggestions silently
+        pass
+    elif len(active_faults) == 0:
+        # Healthy — no suggestions needed
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph("Maintenance Suggestions", S["h2"]))
+        story.append(Paragraph(
+            "The machine is currently healthy. No fault detected — no maintenance action required.",
+            S["body"]
+        ))
+    else:
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph("Maintenance Suggestions", S["h2"]))
+        story.append(Paragraph(
+            "The following rectification steps are recommended based on the detected fault(s).",
+            S["body"]
+        ))
+        story.append(Spacer(1, 0.3*cm))
+
+        for fk in active_faults:
+            sg = SUGGESTIONS[fk]
+            story.append(Paragraph(sg["title"], S["h3"]))
+            story.append(Paragraph(sg["description"], S["body"]))
+            story.append(Spacer(1, 0.2*cm))
+            story.append(Paragraph("<b>Possible Rectifications:</b>", S["body"]))
+            for i, step in enumerate(sg["steps"], 1):
+                story.append(Paragraph(f"  {i}. {step}", S["body"]))
             story.append(Spacer(1, 0.4*cm))
 
     doc.build(story)

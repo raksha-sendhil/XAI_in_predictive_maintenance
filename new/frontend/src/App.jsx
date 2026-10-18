@@ -172,6 +172,39 @@ function App() {
     }
   };
 
+  const suggestionsData = {
+    LeakFault: {
+      title: "Leak Fault",
+      description:
+        "A leak fault indicates loss of fluid from the system, which can reduce pressure and overall efficiency. When this fault is detected, maintenance personnel should inspect seals, gaskets, valves, and pipe connections for damage or wear. Any leaking components should be repaired or replaced immediately to prevent further fluid loss and avoid damage to surrounding equipment.",
+      rectifications: [
+        "If fluid is dripping from the plunger area, use a wrench to slightly tighten the packing gland nut.",
+        "Replace worn out/old seals.",
+        "Try replacing valve seats if the fluid is leaking internally.",
+      ],
+    },
+    BlockingFault: {
+      title: "Blockage Fault",
+      description:
+        "A blockage fault occurs when the flow path is restricted due to debris, sediment buildup, or clogged filters. In this case, the system should be inspected for obstructions, and filters, strainers, and pipelines should be cleaned thoroughly. Restoring proper flow helps maintain pump performance and prevents excessive pressure buildup that could damage the equipment.",
+      rectifications: [
+        "Shut down the pump and manually pull out or clean the debris basket on the suction line.",
+        "Disassemble the valve covers and manually remove any stones or debris wedged inside the suction or the discharge valves.",
+        "Check the plumbing lines to ensure that an inlet valve isn't partially closed.",
+      ],
+    },
+    BearingFault: {
+      title: "Bearing Fault",
+      description:
+        "A bearing fault is usually caused by wear, insufficient lubrication, misalignment, or excessive vibration. Upon detection, the bearing assembly should be inspected, lubrication levels should be checked, and alignment should be verified. If significant wear is observed, the bearing should be replaced to prevent unexpected machine failure and costly downtime.",
+      rectifications: [
+        "If the oil is low, top it up. If it looks milky or pitch black, drain it and refill it with clean oil.",
+        "Check and torque down the connecting rod bolts and main bearing housing caps.",
+        "Adjust the physical alignment between the driving motor and the pump crankshaft to eliminate any angular offset.",
+      ],
+    },
+  };
+
   return (
     <div className="dashboard-root">
       {/* SIDEBAR */}
@@ -592,7 +625,85 @@ function App() {
           </section>
         )}
 
-        {/*----Suggestion Section----*/}
+        {/* ─── SUGGESTIONS SECTION ─── */}
+        {activeSection === "suggestions" && (
+          <section className="content-section">
+            <div className="section-header">
+              <div>
+                <h1 className="section-title" align="center">Maintenance Suggestions</h1>
+                <p className="section-desc" align="center">
+                  Fault-specific maintenance recommendations and rectification steps based on
+                  the latest prediction.
+                </p>
+              </div>
+            </div>
+
+            {(() => {
+              const FAULT_ACTIVE_SEVERITIES = {
+                "Healthy":       [],
+                "LeakFault":     ["LeakFault"],
+                "BlockingFault": ["BlockingFault"],
+                "BearingFault":  ["BearingFault"],
+                "Leak+Block":    ["LeakFault", "BlockingFault"],
+                "Block+Bearing": ["BlockingFault", "BearingFault"],
+                "Bearing+Leak":  ["BearingFault", "LeakFault"],
+                "AllFaults":     ["LeakFault", "BlockingFault", "BearingFault"],
+              };
+
+              if (!predictionResult) {
+                return (
+                  <div className="card empty-state">
+                    <div className="empty-icon">◈</div>
+                    <div className="empty-text">No prediction available. Run a prediction from the Simulation section first.</div>
+                  </div>
+                );
+              }
+
+              const activeFaults = FAULT_ACTIVE_SEVERITIES[predictionResult.fault] ?? null;
+
+              // null means unrecognised fault name; [] means healthy (known, no faults)
+              if (activeFaults === null) {
+                return (
+                  <div className="card empty-state">
+                    <div className="empty-icon">◈</div>
+                    <div className="empty-text">No suggestions available for fault: {predictionResult.fault}</div>
+                  </div>
+                );
+              }
+
+              if (activeFaults.length === 0) {
+                return (
+                  <div className="card empty-state">
+                    <div className="empty-icon" style={{ color: "var(--accent-green)" }}>✓</div>
+                    <div className="empty-text">Machine is healthy — no fault detected, no maintenance action required.</div>
+                  </div>
+                );
+              }
+
+              return activeFaults.map((faultKey) => {
+                const s = suggestionsData[faultKey];
+                return (
+                  <div className="card" key={faultKey} style={{ marginBottom: "16px" }}>
+                    <div className="card-label" style={{ color: "#1a120d", fontSize: "12px" }}>
+                      {s.title.toUpperCase()}
+                    </div>
+                    <p style={{ marginTop: "12px", marginBottom: "18px", lineHeight: "1.75", fontSize: "13px", color: "#1a120d" }}>
+                      {s.description}
+                    </p>
+                    <div className="card-label" style={{ marginBottom: "12px", fontSize: "11px", letterSpacing: "0.08em", color: "#1a120d" }}>
+                      POSSIBLE RECTIFICATIONS
+                    </div>
+                    <ol style={{ paddingLeft: "22px", margin: 0, display: "flex", flexDirection: "column", gap: "10px", color: "#1a120d", fontSize: "13px" }}>
+                      {s.rectifications.map((step, i) => (
+                        <li key={i} style={{ lineHeight: "1.7", paddingLeft: "6px" }}>{step}</li>
+                      ))}
+                    </ol>
+                  </div>
+                );
+              });
+            })()}
+          </section>
+        )}
 
         {/* ─── SENSOR SECTION ─── */}
 

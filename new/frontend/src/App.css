@@ -39,7 +39,7 @@
   /* Typographic Hierarchy (Dark Browns & Charcoal) */
   --text-primary: #2b221a;     /* Deep Espresso Brown for sharp readability */
   --text-secondary: #5c5246;   /* Medium Walnut Brown for subheaders */
-  --text-muted: #8c8070;       /* Muted earth gray-brown for metadata */
+  --text-muted: #27271a;       /* Muted earth gray-brown for metadata */
   
   /* Sidebar Typography inversion */
   --text-light: #f7f5f0;       

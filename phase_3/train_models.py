@@ -1,14 +1,14 @@
 """
-model_training.py
-------------------
+train_models.py
+---------------
 Trains and saves:
-  - fault_classifier.pkl  : RandomForestClassifier  → predicts FaultClass (0/1/2/3)
+  - fault_classifier.pkl  : RandomForestClassifier  → predicts FaultClass (0-7)
   - fault_regressor.pkl   : RandomForestRegressor   → predicts all 3 severity columns
                             (LeakFault, BlockingFault, BearingFault) simultaneously
   - feature_scaler.pkl    : StandardScaler fitted on training features only
-  - model_metrics.json    : Classifier + regressor metrics for the Streamlit UI
+  - model_metrics.json    : Classifier + regressor metrics (reported in the README)
 
-Run this ONCE. After the .pkl files are saved, use fault_prediction.py for inference.
+Run this ONCE. After the .pkl files are saved, the Flask backend (new/backend/app.py) loads them for inference.
 """
 
 import json
